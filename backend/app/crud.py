@@ -62,6 +62,8 @@ async def create_task(db: AsyncSession, project_id: int, data: TaskCreate) -> Te
         title=data.title,
         description=data.description or "",
         status=data.status or "todo",
+        priority=data.priority or "medium",
+        due_date=data.due_date,
         position=next_pos,
     )
     db.add(task)
@@ -100,6 +102,10 @@ async def update_task(db: AsyncSession, task_id: int, project_id: int, data: Tas
         task.description = data.description
     if data.status is not None:
         task.status = data.status
+    if data.priority is not None:
+        task.priority = data.priority
+    if data.due_date is not None:
+        task.due_date = data.due_date
     if data.position is not None:
         task.position = data.position
     await db.commit()

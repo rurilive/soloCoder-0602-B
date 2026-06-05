@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { projectAPI, taskAPI } from '../api';
 import TaskCard from './TaskCard';
+import Modal from './Modal';
+import { useToast } from '../context/ToastContext';
 
 const COLUMNS = [
   { id: 'todo', title: '待办', color: '#6c757d' },
@@ -10,21 +12,45 @@ const COLUMNS = [
   { id: 'done', title: '已完成', color: '#198754' },
 ];
 
+const PRIORITY_OPTIONS = [
+  { value: 'all', label: '全部优先级' },
+  { value: 'low', label: '低优先级' },
+  { value: 'medium', label: '中优先级' },
+  { value: 'high', label: '高优先级' },
+];
+
+const TASK_PRIORITIES = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+];
+
+const TASK_STATUSES = [
+  { value: 'todo', label: '待办' },
+  { value: 'in_progress', label: '进行中' },
+  { value: 'done', label: '已完成' },
+];
+
 export default function KanbanBoard() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskStatus, setNewTaskStatus] = useState('todo');
-  const [error, setError] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState('medium');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [editTask, setEditTask] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   const fetchProject = async () => {
     try {
       const res = await projectAPI.get(projectId);
       setProject(res.data);
     } catch {
-      setError('加载项目失败');
+      showToast('加载项目失败', 'error');
     }
   };
 
@@ -33,7 +59,7 @@ export default function KanbanBoard() {
       const res = await taskAPI.list(projectId);
       setTasks(res.data);
     } catch {
-      setError('加载任务失败');
+      showToast('加载任务失败', 'error');
     }
   };
 
@@ -45,28 +71,69 @@ export default function KanbanBoard() {
   const getTasksByStatus = useCallback((status) => {
     return tasks
       .filter((t) => t.status === status)
+      .filter((t) => priorityFilter === 'all' || t.priority === priorityFilter)
       .sort((a, b) => a.position - b.position);
-  }, [tasks]);
+  }, [tasks, priorityFilter]);
 
   const handleAddTask = async (e) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
-    setError('');
     try {
-      await taskAPI.create(projectId, { title: newTaskTitle, status: newTaskStatus });
+      const data = {
+        title: newTaskTitle,
+        status: newTaskStatus,
+        priority: newTaskPriority,
+      };
+      if (newTaskDueDate) {
+        data.due_date = newTaskDueDate;
+      }
+      await taskAPI.create(projectId, data);
       setNewTaskTitle('');
+      setNewTaskDueDate('');
+      setNewTaskPriority('medium');
       fetchTasks();
+      showToast('任务创建成功', 'success');
     } catch {
-      setError('创建任务失败');
+      showToast('创建任务失败', 'error');
     }
   };
 
   const handleDeleteTask = async (taskId) => {
+    if (!window.confirm('确定删除此任务？')) return;
     try {
       await taskAPI.delete(projectId, taskId);
       fetchTasks();
+      showToast('任务删除成功', 'success');
     } catch {
-      setError('删除任务失败');
+      showToast('删除任务失败', 'error');
+    }
+  };
+
+  const handleEditTask = (task) => {
+    setEditTask({ ...task });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editTask || !editTask.title.trim()) return;
+    try {
+      const data = {
+        title: editTask.title,
+        description: editTask.description,
+        status: editTask.status,
+        priority: editTask.priority,
+      };
+      if (editTask.due_date) {
+        data.due_date = editTask.due_date;
+      }
+      await taskAPI.update(projectId, editTask.id, data);
+      setEditModalOpen(false);
+      setEditTask(null);
+      fetchTasks();
+      showToast('任务更新成功', 'success');
+    } catch {
+      showToast('更新任务失败', 'error');
     }
   };
 
@@ -114,7 +181,7 @@ export default function KanbanBoard() {
       await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition });
     } catch {
       setTasks(oldTasks);
-      setError('移动任务失败');
+      showToast('移动任务失败', 'error');
     }
   };
 
@@ -127,8 +194,6 @@ export default function KanbanBoard() {
         <h2>{project.name}</h2>
       </div>
 
-      {error && <div className="error-msg">{error}</div>}
-
       <form className="add-task-form" onSubmit={handleAddTask}>
         <input
           type="text"
@@ -138,10 +203,21 @@ export default function KanbanBoard() {
           required
         />
         <select value={newTaskStatus} onChange={(e) => setNewTaskStatus(e.target.value)}>
-          {COLUMNS.map((col) => (
-            <option key={col.id} value={col.id}>{col.title}</option>
+          {TASK_STATUSES.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
+        <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)}>
+          {TASK_PRIORITIES.map((p) => (
+            <option key={p.value} value={p.value}>优先级: {p.label}</option>
+          ))}
+        </select>
+        <input
+          type="date"
+          placeholder="截止日期"
+          value={newTaskDueDate}
+          onChange={(e) => setNewTaskDueDate(e.target.value)}
+        />
         <button type="submit" className="btn btn-primary">添加任务</button>
       </form>
 
@@ -153,7 +229,18 @@ export default function KanbanBoard() {
               <div className="kanban-column" key={column.id}>
                 <div className="column-header" style={{ borderTopColor: column.color }}>
                   <span className="column-title">{column.title}</span>
-                  <span className="column-count">{columnTasks.length}</span>
+                  <div className="column-header-right">
+                    <select
+                      className="priority-filter"
+                      value={priorityFilter}
+                      onChange={(e) => setPriorityFilter(e.target.value)}
+                    >
+                      {PRIORITY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    <span className="column-count">{columnTasks.length}</span>
+                  </div>
                 </div>
                 <Droppable droppableId={column.id}>
                   {(provided, snapshot) => (
@@ -171,7 +258,7 @@ export default function KanbanBoard() {
                               {...provided.dragHandleProps}
                               className={`task-card-wrapper${snapshot.isDragging ? ' dragging' : ''}`}
                             >
-                              <TaskCard task={task} onDelete={handleDeleteTask} />
+                              <TaskCard task={task} onDelete={handleDeleteTask} onEdit={handleEditTask} />
                             </div>
                           )}
                         </Draggable>
@@ -188,6 +275,64 @@ export default function KanbanBoard() {
           })}
         </div>
       </DragDropContext>
+
+      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="编辑任务">
+        <form onSubmit={handleSaveEdit}>
+          <div className="form-group">
+            <label>标题</label>
+            <input
+              type="text"
+              value={editTask?.title || ''}
+              onChange={(e) => setEditTask({ ...editTask, title: e.target.value })}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>描述</label>
+            <textarea
+              value={editTask?.description || ''}
+              onChange={(e) => setEditTask({ ...editTask, description: e.target.value })}
+              rows={3}
+            />
+          </div>
+          <div className="form-group">
+            <label>状态</label>
+            <select
+              value={editTask?.status || 'todo'}
+              onChange={(e) => setEditTask({ ...editTask, status: e.target.value })}
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>优先级</label>
+            <select
+              value={editTask?.priority || 'medium'}
+              onChange={(e) => setEditTask({ ...editTask, priority: e.target.value })}
+            >
+              {TASK_PRIORITIES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>截止日期</label>
+            <input
+              type="date"
+              value={editTask?.due_date ? editTask.due_date.slice(0, 10) : ''}
+              onChange={(e) => setEditTask({ ...editTask, due_date: e.target.value })}
+            />
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="btn btn-outline" onClick={() => setEditModalOpen(false)}>
+              取消
+            </button>
+            <button type="submit" className="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -4,6 +4,7 @@ from datetime import datetime
 
 
 VALID_STATUSES = ("todo", "in_progress", "done")
+VALID_PRIORITIES = ("low", "medium", "high")
 
 
 class CompanyRegister(BaseModel):
@@ -62,12 +63,16 @@ class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = ""
     status: Optional[str] = Field("todo", pattern="^(todo|in_progress|done)$")
+    priority: Optional[str] = Field("medium", pattern="^(low|medium|high)$")
+    due_date: Optional[datetime] = None
 
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(todo|in_progress|done)$")
+    priority: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    due_date: Optional[datetime] = None
     position: Optional[int] = None
 
 
@@ -77,6 +82,8 @@ class TaskResponse(BaseModel):
     title: str
     description: str
     status: str
+    priority: str
+    due_date: Optional[datetime]
     position: int
     created_at: datetime
     updated_at: datetime

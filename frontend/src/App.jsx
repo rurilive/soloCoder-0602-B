@@ -5,9 +5,30 @@ import Register from './components/Register';
 import ProjectList from './components/ProjectList';
 import KanbanBoard from './components/KanbanBoard';
 import { authAPI } from './api';
+import { ToastProvider } from './context/ToastContext';
 
 function PrivateRoute({ children }) {
-  return localStorage.getItem('token') ? children : <Navigate to="/login" />;
+  const [isValid, setIsValid] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setIsValid(false);
+      return;
+    }
+    authAPI.me()
+      .then(() => setIsValid(true))
+      .catch(() => {
+        localStorage.removeItem('token');
+        setIsValid(false);
+      });
+  }, []);
+
+  if (isValid === null) {
+    return <div className="loading">验证中...</div>;
+  }
+
+  return isValid ? children : <Navigate to="/login" />;
 }
 
 function Navbar({ companyName, onLogout }) {
@@ -64,7 +85,9 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </BrowserRouter>
   );
 }

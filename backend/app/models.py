@@ -36,6 +36,8 @@ class TenantTask(Base):
     title = Column(String(300), nullable=False)
     description = Column(Text, default="")
     status = Column(String(20), default="todo", nullable=False)
+    priority = Column(String(20), default="medium", nullable=False)
+    due_date = Column(DateTime(timezone=True), nullable=True)
     position = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
