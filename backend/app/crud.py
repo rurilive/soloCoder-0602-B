@@ -1,5 +1,6 @@
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import NoResultFound, SQLAlchemyError
 from app.models import TenantProject, TenantTask
 from app.schemas import ProjectCreate, ProjectUpdate, TaskCreate, TaskUpdate
 
@@ -98,12 +99,21 @@ async def update_task(db: AsyncSession, task: TenantTask, data: TaskUpdate) -> T
 
 
 async def reorder_task(db: AsyncSession, task: TenantTask, new_status: str, new_position: int) -> TenantTask:
-    old_status = task.status
-    old_position = task.position
-    project_id = task.project_id
+    result = await db.execute(
+        select(TenantTask)
+        .where(TenantTask.id == task.id)
+        .with_for_update()
+    )
+    locked_task = result.scalar_one_or_none()
+    if not locked_task:
+        raise NoResultFound("Task not found")
+
+    old_status = locked_task.status
+    old_position = locked_task.position
+    project_id = locked_task.project_id
 
     if old_status == new_status and old_position == new_position:
-        return task
+        return locked_task
 
     if old_status == new_status:
         if new_position < old_position:
@@ -140,21 +150,38 @@ async def reorder_task(db: AsyncSession, task: TenantTask, new_status: str, new_
             .values(position=TenantTask.position + 1)
         )
 
-    task.status = new_status
-    task.position = new_position
+    locked_task.status = new_status
+    locked_task.position = new_position
     await db.commit()
-    await db.refresh(task)
-    return task
+    await db.refresh(locked_task)
+    return locked_task
 
 
-async def delete_task(db: AsyncSession, task: TenantTask) -> None:
-    project_id = task.project_id
-    await db.execute(
-        update(TenantTask)
-        .where(TenantTask.project_id == project_id)
-        .where(TenantTask.status == task.status)
-        .where(TenantTask.position > task.position)
-        .values(position=TenantTask.position - 1)
-    )
-    await db.delete(task)
-    await db.commit()
+async def delete_task(db: AsyncSession, task: TenantTask) -> bool:
+    try:
+        result = await db.execute(
+            select(TenantTask)
+            .where(TenantTask.id == task.id)
+            .with_for_update()
+        )
+        locked_task = result.scalar_one_or_none()
+        if not locked_task:
+            return False
+
+        project_id = locked_task.project_id
+        task_status = locked_task.status
+        task_position = locked_task.position
+
+        await db.execute(
+            update(TenantTask)
+            .where(TenantTask.project_id == project_id)
+            .where(TenantTask.status == task_status)
+            .where(TenantTask.position > task_position)
+            .values(position=TenantTask.position - 1)
+        )
+        await db.delete(locked_task)
+        await db.commit()
+        return True
+    except (NoResultFound, SQLAlchemyError):
+        await db.rollback()
+        return False

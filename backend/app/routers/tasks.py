@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
+from sqlalchemy.exc import NoResultFound
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse, TaskReorder
 from app.crud import (
     create_task, get_tasks_by_project, get_task,
@@ -45,7 +46,10 @@ async def reorder(project_id: int, task_id: int, data: TaskReorder, db: AsyncSes
     task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    return await reorder_task(db, task, data.new_status, data.new_position)
+    try:
+        return await reorder_task(db, task, data.new_status, data.new_position)
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="Task not found")
 
 
 @router.delete("/{task_id}")
@@ -53,5 +57,7 @@ async def remove(project_id: int, task_id: int, db: AsyncSession = Depends(get_t
     task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    await delete_task(db, task)
+    success = await delete_task(db, task)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found")
     return {"detail": "Deleted"}
