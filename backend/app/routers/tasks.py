@@ -34,22 +34,26 @@ async def get(project_id: int, task_id: int, db: AsyncSession = Depends(get_tena
 
 @router.put("/{task_id}", response_model=TaskResponse)
 async def update(project_id: int, task_id: int, data: TaskUpdate, db: AsyncSession = Depends(get_tenant_db)):
-    task = await update_task(db, task_id, data)
+    task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
+    task = await update_task(db, task_id, data)
     return task
 
 
 @router.put("/{task_id}/reorder", response_model=TaskResponse)
 async def reorder(project_id: int, task_id: int, data: TaskReorder, db: AsyncSession = Depends(get_tenant_db)):
-    task = await reorder_task(db, task_id, data.new_status, data.new_position)
+    task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
+    task = await reorder_task(db, task_id, data.new_status, data.new_position)
     return task
 
 
 @router.delete("/{task_id}")
 async def remove(project_id: int, task_id: int, db: AsyncSession = Depends(get_tenant_db)):
-    if not await delete_task(db, task_id):
+    task = await get_task(db, task_id)
+    if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
+    await delete_task(db, task_id)
     return {"detail": "Deleted"}

@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
-from app.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal, sync_engine
 from app.models import Company
 from app.schemas import CompanyRegister, CompanyLogin, CompanyResponse, Token
-from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.auth import hash_password, verify_password, create_access_token, get_current_user, validate_schema_name
 from app.schemas import TokenData
-from app.config import SYNC_DATABASE_URL
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -48,23 +47,20 @@ async def register(data: CompanyRegister):
         db.add(company)
         await db.flush()
 
-        schema_name = f"tenant_{company.id}"
+        schema_name = validate_schema_name(f"tenant_{company.id}")
         company.schema_name = schema_name
 
         await db.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
         await db.commit()
         await db.refresh(company)
 
-    from sqlalchemy import create_engine
-    sync_eng = create_engine(SYNC_DATABASE_URL)
-    with sync_eng.connect() as conn:
+    with sync_engine.connect() as conn:
         conn.execute(text(f"SET search_path TO {schema_name}, public"))
         for stmt in TENANT_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
         conn.commit()
-    sync_eng.dispose()
 
     return company
 

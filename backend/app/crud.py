@@ -106,6 +106,7 @@ async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_posi
         return None
     old_status = task.status
     old_position = task.position
+    project_id = task.project_id
 
     if old_status == new_status and old_position == new_position:
         return task
@@ -114,6 +115,7 @@ async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_posi
         if new_position < old_position:
             await db.execute(
                 update(TenantTask)
+                .where(TenantTask.project_id == project_id)
                 .where(TenantTask.status == new_status)
                 .where(TenantTask.position >= new_position)
                 .where(TenantTask.position < old_position)
@@ -122,6 +124,7 @@ async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_posi
         else:
             await db.execute(
                 update(TenantTask)
+                .where(TenantTask.project_id == project_id)
                 .where(TenantTask.status == new_status)
                 .where(TenantTask.position > old_position)
                 .where(TenantTask.position <= new_position)
@@ -130,12 +133,14 @@ async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_posi
     else:
         await db.execute(
             update(TenantTask)
+            .where(TenantTask.project_id == project_id)
             .where(TenantTask.status == old_status)
             .where(TenantTask.position > old_position)
             .values(position=TenantTask.position - 1)
         )
         await db.execute(
             update(TenantTask)
+            .where(TenantTask.project_id == project_id)
             .where(TenantTask.status == new_status)
             .where(TenantTask.position >= new_position)
             .values(position=TenantTask.position + 1)
@@ -152,8 +157,10 @@ async def delete_task(db: AsyncSession, task_id: int) -> bool:
     task = await get_task(db, task_id)
     if not task:
         return False
+    project_id = task.project_id
     await db.execute(
         update(TenantTask)
+        .where(TenantTask.project_id == project_id)
         .where(TenantTask.status == task.status)
         .where(TenantTask.position > task.position)
         .values(position=TenantTask.position - 1)

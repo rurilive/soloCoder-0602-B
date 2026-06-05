@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -8,6 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.database import AsyncSessionLocal
 from app.schemas import TokenData
+
+TENANT_SCHEMA_PATTERN = re.compile(r"^tenant_\d+$")
+
+
+def validate_schema_name(schema_name: str) -> str:
+    if not TENANT_SCHEMA_PATTERN.match(schema_name):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token schema")
+    return schema_name
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -35,6 +44,7 @@ def decode_access_token(token: str) -> TokenData:
         schema_name: str = payload.get("schema_name")
         if company_id is None or schema_name is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        validate_schema_name(schema_name)
         return TokenData(company_id=company_id, schema_name=schema_name)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
@@ -45,6 +55,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
 
 
 async def get_tenant_db(token_data: TokenData = Depends(get_current_user)):
+    schema_name = validate_schema_name(token_data.schema_name)
     async with AsyncSessionLocal() as session:
-        await session.execute(text(f"SET search_path TO {token_data.schema_name}, public"))
+        await session.execute(text(f"SET search_path TO {schema_name}, public"))
         yield session

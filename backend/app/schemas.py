@@ -1,12 +1,15 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime
+
+
+VALID_STATUSES = ("todo", "in_progress", "done")
 
 
 class CompanyRegister(BaseModel):
     name: str
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=6)
 
 
 class CompanyLogin(BaseModel):
@@ -58,13 +61,13 @@ class ProjectResponse(BaseModel):
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = ""
-    status: Optional[str] = "todo"
+    status: Optional[str] = Field("todo", pattern="^(todo|in_progress|done)$")
 
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(todo|in_progress|done)$")
     position: Optional[int] = None
 
 
@@ -84,5 +87,5 @@ class TaskResponse(BaseModel):
 
 class TaskReorder(BaseModel):
     task_id: int
-    new_status: str
+    new_status: str = Field(..., pattern="^(todo|in_progress|done)$")
     new_position: int
