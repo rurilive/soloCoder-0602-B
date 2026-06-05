@@ -1,6 +1,6 @@
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import NoResultFound, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from app.models import TenantProject, TenantTask
 from app.schemas import ProjectCreate, ProjectUpdate, TaskCreate, TaskUpdate
 
@@ -84,7 +84,16 @@ async def get_task(db: AsyncSession, task_id: int) -> TenantTask | None:
     return result.scalar_one_or_none()
 
 
-async def update_task(db: AsyncSession, task: TenantTask, data: TaskUpdate) -> TenantTask:
+async def update_task(db: AsyncSession, task_id: int, project_id: int, data: TaskUpdate) -> TenantTask | None:
+    result = await db.execute(
+        select(TenantTask)
+        .where(TenantTask.id == task_id)
+        .where(TenantTask.project_id == project_id)
+        .with_for_update()
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        return None
     if data.title is not None:
         task.title = data.title
     if data.description is not None:
@@ -98,22 +107,29 @@ async def update_task(db: AsyncSession, task: TenantTask, data: TaskUpdate) -> T
     return task
 
 
-async def reorder_task(db: AsyncSession, task: TenantTask, new_status: str, new_position: int) -> TenantTask:
-    result = await db.execute(
+async def reorder_task(db: AsyncSession, task_id: int, project_id: int, new_status: str, new_position: int) -> TenantTask | None:
+    task_result = await db.execute(
         select(TenantTask)
-        .where(TenantTask.id == task.id)
+        .where(TenantTask.id == task_id)
+        .where(TenantTask.project_id == project_id)
         .with_for_update()
     )
-    locked_task = result.scalar_one_or_none()
-    if not locked_task:
-        raise NoResultFound("Task not found")
+    moving_task = task_result.scalar_one_or_none()
+    if not moving_task:
+        return None
 
-    old_status = locked_task.status
-    old_position = locked_task.position
-    project_id = locked_task.project_id
+    old_status = moving_task.status
+    old_position = moving_task.position
+
+    await db.execute(
+        select(TenantTask)
+        .where(TenantTask.project_id == project_id)
+        .where(TenantTask.status.in_([old_status, new_status]))
+        .with_for_update()
+    )
 
     if old_status == new_status and old_position == new_position:
-        return locked_task
+        return moving_task
 
     if old_status == new_status:
         if new_position < old_position:
@@ -150,27 +166,34 @@ async def reorder_task(db: AsyncSession, task: TenantTask, new_status: str, new_
             .values(position=TenantTask.position + 1)
         )
 
-    locked_task.status = new_status
-    locked_task.position = new_position
+    moving_task.status = new_status
+    moving_task.position = new_position
     await db.commit()
-    await db.refresh(locked_task)
-    return locked_task
+    await db.refresh(moving_task)
+    return moving_task
 
 
-async def delete_task(db: AsyncSession, task: TenantTask) -> bool:
+async def delete_task(db: AsyncSession, task_id: int, project_id: int) -> bool:
     try:
         result = await db.execute(
             select(TenantTask)
-            .where(TenantTask.id == task.id)
+            .where(TenantTask.id == task_id)
+            .where(TenantTask.project_id == project_id)
             .with_for_update()
         )
         locked_task = result.scalar_one_or_none()
         if not locked_task:
             return False
 
-        project_id = locked_task.project_id
         task_status = locked_task.status
         task_position = locked_task.position
+
+        await db.execute(
+            select(TenantTask)
+            .where(TenantTask.project_id == project_id)
+            .where(TenantTask.status == task_status)
+            .with_for_update()
+        )
 
         await db.execute(
             update(TenantTask)
@@ -182,6 +205,6 @@ async def delete_task(db: AsyncSession, task: TenantTask) -> bool:
         await db.delete(locked_task)
         await db.commit()
         return True
-    except (NoResultFound, SQLAlchemyError):
+    except SQLAlchemyError:
         await db.rollback()
         return False
