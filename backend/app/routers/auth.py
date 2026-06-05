@@ -54,13 +54,12 @@ async def register(data: CompanyRegister):
         await db.commit()
         await db.refresh(company)
 
-    with sync_engine.connect() as conn:
+    with sync_engine.begin() as conn:
         conn.execute(text(f"SET search_path TO {schema_name}, public"))
         for stmt in TENANT_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
-        conn.commit()
 
     return company
 

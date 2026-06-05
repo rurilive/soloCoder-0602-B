@@ -15,9 +15,39 @@ fi
 if [ -n "$COMPOSE" ]; then
     if ! $COMPOSE -f "$SCRIPT_DIR/docker-compose.yml" ps 2>/dev/null | grep -q "db.*running\|db.*Up"; then
         $COMPOSE -f "$SCRIPT_DIR/docker-compose.yml" up -d
-        echo "Waiting for PostgreSQL to be ready..."
-        sleep 3
     fi
+
+    echo "Waiting for PostgreSQL to be ready..."
+    POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+    POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+    POSTGRES_USER="${POSTGRES_USER:-taskmanager}"
+    POSTGRES_DB="${POSTGRES_DB:-taskmanager}"
+    TIMEOUT=30
+    ELAPSED=0
+
+    while [ $ELAPSED -lt $TIMEOUT ]; do
+        if command -v pg_isready &>/dev/null; then
+            if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q 2>/dev/null; then
+                echo "PostgreSQL is ready!"
+                break
+            fi
+        else
+            if nc -z "$POSTGRES_HOST" "$POSTGRES_PORT" 2>/dev/null; then
+                echo "PostgreSQL port $POSTGRES_PORT is open (pg_isready not available)"
+                break
+            fi
+        fi
+        sleep 1
+        ELAPSED=$((ELAPSED + 1))
+        echo -n "."
+    done
+
+    if [ $ELAPSED -ge $TIMEOUT ]; then
+        echo ""
+        echo "ERROR: PostgreSQL failed to start within $TIMEOUT seconds" >&2
+        exit 1
+    fi
+    echo ""
 else
     echo "WARNING: Docker Compose not found. Make sure PostgreSQL is running manually."
     echo "  Expected connection: postgresql://taskmanager:taskmanager123@localhost:5432/taskmanager"

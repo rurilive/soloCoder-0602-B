@@ -54,7 +54,7 @@ async def create_task(db: AsyncSession, project_id: int, data: TaskCreate) -> Te
         .where(TenantTask.status == (data.status or "todo"))
         .order_by(TenantTask.position.desc())
     )
-    last_task = result.scalar_one_or_none()
+    last_task = result.scalars().first()
     next_pos = (last_task.position + 1) if last_task else 0
     task = TenantTask(
         project_id=project_id,
@@ -83,10 +83,7 @@ async def get_task(db: AsyncSession, task_id: int) -> TenantTask | None:
     return result.scalar_one_or_none()
 
 
-async def update_task(db: AsyncSession, task_id: int, data: TaskUpdate) -> TenantTask | None:
-    task = await get_task(db, task_id)
-    if not task:
-        return None
+async def update_task(db: AsyncSession, task: TenantTask, data: TaskUpdate) -> TenantTask:
     if data.title is not None:
         task.title = data.title
     if data.description is not None:
@@ -100,10 +97,7 @@ async def update_task(db: AsyncSession, task_id: int, data: TaskUpdate) -> Tenan
     return task
 
 
-async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_position: int) -> TenantTask | None:
-    task = await get_task(db, task_id)
-    if not task:
-        return None
+async def reorder_task(db: AsyncSession, task: TenantTask, new_status: str, new_position: int) -> TenantTask:
     old_status = task.status
     old_position = task.position
     project_id = task.project_id
@@ -153,10 +147,7 @@ async def reorder_task(db: AsyncSession, task_id: int, new_status: str, new_posi
     return task
 
 
-async def delete_task(db: AsyncSession, task_id: int) -> bool:
-    task = await get_task(db, task_id)
-    if not task:
-        return False
+async def delete_task(db: AsyncSession, task: TenantTask) -> None:
     project_id = task.project_id
     await db.execute(
         update(TenantTask)
@@ -167,4 +158,3 @@ async def delete_task(db: AsyncSession, task_id: int) -> bool:
     )
     await db.delete(task)
     await db.commit()
-    return True

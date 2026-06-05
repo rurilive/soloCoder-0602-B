@@ -37,8 +37,7 @@ async def update(project_id: int, task_id: int, data: TaskUpdate, db: AsyncSessi
     task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    task = await update_task(db, task_id, data)
-    return task
+    return await update_task(db, task, data)
 
 
 @router.put("/{task_id}/reorder", response_model=TaskResponse)
@@ -46,8 +45,7 @@ async def reorder(project_id: int, task_id: int, data: TaskReorder, db: AsyncSes
     task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    task = await reorder_task(db, task_id, data.new_status, data.new_position)
-    return task
+    return await reorder_task(db, task, data.new_status, data.new_position)
 
 
 @router.delete("/{task_id}")
@@ -55,5 +53,5 @@ async def remove(project_id: int, task_id: int, db: AsyncSession = Depends(get_t
     task = await get_task(db, task_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    await delete_task(db, task_id)
+    await delete_task(db, task)
     return {"detail": "Deleted"}
