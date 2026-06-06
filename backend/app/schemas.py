@@ -36,6 +36,7 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     company_id: int
     schema_name: str
+    token_version: int
 
 
 class ProjectCreate(BaseModel):

@@ -31,6 +31,7 @@ class ConnectionManager:
         project_id: int,
         task: TaskResponse,
         action: str = "update",
+        request_id: str | None = None,
         exclude_websocket: WebSocket | None = None,
     ):
         key = self._get_key(schema_name, project_id)
@@ -40,6 +41,7 @@ class ConnectionManager:
         message = {
             "type": "task_update",
             "action": action,
+            "request_id": request_id,
             "data": {
                 "id": task.id,
                 "project_id": task.project_id,
@@ -68,6 +70,7 @@ class ConnectionManager:
         schema_name: str,
         project_id: int,
         task_id: int,
+        request_id: str | None = None,
         exclude_websocket: WebSocket | None = None,
     ):
         key = self._get_key(schema_name, project_id)
@@ -77,6 +80,7 @@ class ConnectionManager:
         message = {
             "type": "task_update",
             "action": "delete",
+            "request_id": request_id,
             "data": {"id": task_id, "project_id": project_id},
         }
 
@@ -96,6 +100,7 @@ class ConnectionManager:
         project_id: int,
         tasks: list[TaskResponse],
         action: str = "bulk_update",
+        request_id: str | None = None,
         exclude_websocket: WebSocket | None = None,
     ):
         key = self._get_key(schema_name, project_id)
@@ -105,6 +110,7 @@ class ConnectionManager:
         message = {
             "type": "task_update",
             "action": action,
+            "request_id": request_id,
             "data": [
                 {
                     "id": task.id,
@@ -136,6 +142,7 @@ class ConnectionManager:
         schema_name: str,
         project_id: int,
         task_ids: list[int],
+        request_id: str | None = None,
         exclude_websocket: WebSocket | None = None,
     ):
         key = self._get_key(schema_name, project_id)
@@ -145,6 +152,7 @@ class ConnectionManager:
         message = {
             "type": "task_update",
             "action": "bulk_delete",
+            "request_id": request_id,
             "data": {"task_ids": task_ids, "project_id": project_id},
         }
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse, TaskReorder, BulkTaskMove, BulkTaskDelete
 from app.crud import (
@@ -14,10 +14,15 @@ from app.websocket_manager import manager
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["tasks"])
 
 
+def get_request_id(request: Request) -> str | None:
+    return request.headers.get("X-Request-ID")
+
+
 @router.post("", response_model=TaskResponse)
 async def create(
     project_id: int,
     data: TaskCreate,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -25,7 +30,8 @@ async def create(
     if not task:
         raise HTTPException(status_code=404, detail="Project not found")
     await manager.broadcast_task_update(
-        token_data.schema_name, project_id, task, action="create"
+        token_data.schema_name, project_id, task, action="create",
+        request_id=get_request_id(request)
     )
     return task
 
@@ -48,6 +54,7 @@ async def update(
     project_id: int,
     task_id: int,
     data: TaskUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -55,7 +62,8 @@ async def update(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     await manager.broadcast_task_update(
-        token_data.schema_name, project_id, task, action="update"
+        token_data.schema_name, project_id, task, action="update",
+        request_id=get_request_id(request)
     )
     return task
 
@@ -65,6 +73,7 @@ async def reorder(
     project_id: int,
     task_id: int,
     data: TaskReorder,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -72,7 +81,8 @@ async def reorder(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     await manager.broadcast_task_update(
-        token_data.schema_name, project_id, task, action="update"
+        token_data.schema_name, project_id, task, action="update",
+        request_id=get_request_id(request)
     )
     return task
 
@@ -81,6 +91,7 @@ async def reorder(
 async def remove(
     project_id: int,
     task_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -88,7 +99,8 @@ async def remove(
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
     await manager.broadcast_task_delete(
-        token_data.schema_name, project_id, task_id
+        token_data.schema_name, project_id, task_id,
+        request_id=get_request_id(request)
     )
     return {"detail": "Deleted"}
 
@@ -97,6 +109,7 @@ async def remove(
 async def bulk_move(
     project_id: int,
     data: BulkTaskMove,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -104,7 +117,8 @@ async def bulk_move(
         updated_tasks = await bulk_move_tasks(db, project_id, data.task_ids, data.new_status)
         if updated_tasks:
             await manager.broadcast_bulk_update(
-                token_data.schema_name, project_id, updated_tasks, action="bulk_update"
+                token_data.schema_name, project_id, updated_tasks, action="bulk_update",
+                request_id=get_request_id(request)
             )
         return updated_tasks
     except Exception as e:
@@ -115,6 +129,7 @@ async def bulk_move(
 async def bulk_delete(
     project_id: int,
     data: BulkTaskDelete,
+    request: Request,
     db: AsyncSession = Depends(get_tenant_db),
     token_data: TokenData = Depends(get_current_user),
 ):
@@ -122,11 +137,13 @@ async def bulk_delete(
         result = await bulk_delete_tasks(db, project_id, data.task_ids)
         if result["deleted_count"] > 0:
             await manager.broadcast_bulk_delete(
-                token_data.schema_name, project_id, result["deleted_ids"]
+                token_data.schema_name, project_id, result["deleted_ids"],
+                request_id=get_request_id(request)
             )
             if result["updated_tasks"]:
                 await manager.broadcast_bulk_update(
-                    token_data.schema_name, project_id, result["updated_tasks"], action="bulk_update"
+                    token_data.schema_name, project_id, result["updated_tasks"], action="bulk_update",
+                    request_id=get_request_id(request)
                 )
         return result
     except Exception as e:

@@ -4,10 +4,17 @@ const api = axios.create({
   baseURL: '/api',
 });
 
+export function generateRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (!config.headers['X-Request-ID']) {
+    config.headers['X-Request-ID'] = generateRequestId();
   }
   return config;
 });

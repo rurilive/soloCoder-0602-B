@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import { projectAPI, taskAPI } from '../api';
+import { projectAPI, taskAPI, generateRequestId } from '../api';
 import TaskCard from './TaskCard';
 import Modal from './Modal';
 import { useToast } from '../context/ToastContext';
@@ -49,7 +49,7 @@ export default function KanbanBoard() {
   const [bulkMoveStatus, setBulkMoveStatus] = useState('in_progress');
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const wsRef = useRef(null);
-  const isLocalUpdateRef = useRef(false);
+  const pendingRequestIdsRef = useRef(new Set());
 
   const fetchProject = async () => {
     try {
@@ -85,14 +85,14 @@ export default function KanbanBoard() {
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
-      if (isLocalUpdateRef.current) {
-        isLocalUpdateRef.current = false;
-        return;
-      }
-
       try {
         const message = JSON.parse(event.data);
         if (message.type !== 'task_update') return;
+
+        if (message.request_id && pendingRequestIdsRef.current.has(message.request_id)) {
+          pendingRequestIdsRef.current.delete(message.request_id);
+          return;
+        }
 
         setTasks((prevTasks) => {
           let newTasks = [...prevTasks];
@@ -156,6 +156,8 @@ export default function KanbanBoard() {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
     try {
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
       const data = {
         title: newTaskTitle,
         status: newTaskStatus,
@@ -164,8 +166,9 @@ export default function KanbanBoard() {
       if (newTaskDueDate) {
         data.due_date = newTaskDueDate;
       }
-      isLocalUpdateRef.current = true;
-      await taskAPI.create(projectId, data);
+      await taskAPI.create(projectId, data, {
+        headers: { 'X-Request-ID': requestId }
+      });
       setNewTaskTitle('');
       setNewTaskDueDate('');
       setNewTaskPriority('medium');
@@ -179,8 +182,11 @@ export default function KanbanBoard() {
   const handleDeleteTask = async (taskId) => {
     if (!window.confirm('确定删除此任务？')) return;
     try {
-      isLocalUpdateRef.current = true;
-      await taskAPI.delete(projectId, taskId);
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
+      await taskAPI.delete(projectId, taskId, {
+        headers: { 'X-Request-ID': requestId }
+      });
       fetchTasks();
       showToast('任务删除成功', 'success');
     } catch {
@@ -197,6 +203,8 @@ export default function KanbanBoard() {
     e.preventDefault();
     if (!editTask || !editTask.title.trim()) return;
     try {
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
       const data = {
         title: editTask.title,
         description: editTask.description,
@@ -206,8 +214,9 @@ export default function KanbanBoard() {
       if (editTask.due_date) {
         data.due_date = editTask.due_date;
       }
-      isLocalUpdateRef.current = true;
-      await taskAPI.update(projectId, editTask.id, data);
+      await taskAPI.update(projectId, editTask.id, data, {
+        headers: { 'X-Request-ID': requestId }
+      });
       setEditModalOpen(false);
       setEditTask(null);
       fetchTasks();
@@ -258,8 +267,11 @@ export default function KanbanBoard() {
     setTasks(newTasks);
 
     try {
-      isLocalUpdateRef.current = true;
-      await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition });
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
+      await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition }, {
+        headers: { 'X-Request-ID': requestId }
+      });
     } catch {
       setTasks(oldTasks);
       showToast('移动任务失败', 'error');
@@ -289,10 +301,13 @@ export default function KanbanBoard() {
   const handleBulkMove = async () => {
     if (selectedTasks.size === 0) return;
     try {
-      isLocalUpdateRef.current = true;
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.bulkMove(projectId, {
         task_ids: Array.from(selectedTasks),
         new_status: bulkMoveStatus,
+      }, {
+        headers: { 'X-Request-ID': requestId }
       });
       setSelectedTasks(new Set());
       setSelectMode(false);
@@ -308,9 +323,12 @@ export default function KanbanBoard() {
     if (selectedTasks.size === 0) return;
     if (!window.confirm(`确定删除选中的 ${selectedTasks.size} 个任务？`)) return;
     try {
-      isLocalUpdateRef.current = true;
+      const requestId = generateRequestId();
+      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.bulkDelete(projectId, {
         task_ids: Array.from(selectedTasks),
+      }, {
+        headers: { 'X-Request-ID': requestId }
       });
       setSelectedTasks(new Set());
       setSelectMode(false);

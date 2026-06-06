@@ -4,11 +4,12 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.database import AsyncSessionLocal
 from app.schemas import TokenData
+from app.models import Company
 
 TENANT_SCHEMA_PATTERN = re.compile(r"^tenant_\d+$")
 
@@ -42,16 +43,28 @@ def decode_access_token(token: str) -> TokenData:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         company_id: int = payload.get("company_id")
         schema_name: str = payload.get("schema_name")
+        token_version: int = payload.get("token_version", 0)
         if company_id is None or schema_name is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         validate_schema_name(schema_name)
-        return TokenData(company_id=company_id, schema_name=schema_name)
+        return TokenData(company_id=company_id, schema_name=schema_name, token_version=token_version)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
-    return decode_access_token(token)
+    token_data = decode_access_token(token)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Company).where(Company.id == token_data.company_id)
+        )
+        company = result.scalar_one_or_none()
+        if not company or company.token_version != token_data.token_version:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired or invalid, please login again"
+            )
+    return token_data
 
 
 async def get_tenant_db(token_data: TokenData = Depends(get_current_user)):

@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     title VARCHAR(300) NOT NULL,
     description TEXT DEFAULT '',
     status VARCHAR(20) NOT NULL DEFAULT 'todo',
+    priority VARCHAR(20) NOT NULL DEFAULT 'medium',
+    due_date TIMESTAMPTZ,
     position INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -71,7 +73,11 @@ async def login(data: CompanyLogin):
         company = result.scalar_one_or_none()
         if not company or not verify_password(data.password, company.hashed_password):
             raise HTTPException(status_code=401, detail="Invalid email or password")
-        token = create_access_token({"company_id": company.id, "schema_name": company.schema_name})
+        token = create_access_token({
+            "company_id": company.id,
+            "schema_name": company.schema_name,
+            "token_version": company.token_version
+        })
         return Token(access_token=token)
 
 
@@ -89,12 +95,18 @@ async def me(token_data: TokenData = Depends(get_current_user)):
 async def delete_tenant(token_data: TokenData = Depends(get_current_user)):
     schema_name = validate_schema_name(token_data.schema_name)
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Company).where(Company.id == token_data.company_id))
+        result = await db.execute(
+            select(Company)
+            .where(Company.id == token_data.company_id)
+            .with_for_update()
+        )
         company = result.scalar_one_or_none()
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
 
         try:
+            company.token_version += 1
+            await db.flush()
             await db.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
             await db.delete(company)
             await db.commit()
