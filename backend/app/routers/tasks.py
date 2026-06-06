@@ -38,7 +38,10 @@ async def create(
         related_task_id=task.id,
         related_project_id=project_id,
     )
-    await manager.broadcast_notification(token_data.schema_name, notification)
+    await manager.broadcast_notification(
+        token_data.schema_name, notification,
+        request_id=get_request_id(request)
+    )
     
     await manager.broadcast_task_update(
         token_data.schema_name, project_id, task, action="create",
@@ -81,7 +84,10 @@ async def update(
         related_task_id=task.id,
         related_project_id=project_id,
     )
-    await manager.broadcast_notification(token_data.schema_name, notification)
+    await manager.broadcast_notification(
+        token_data.schema_name, notification,
+        request_id=get_request_id(request)
+    )
     
     await manager.broadcast_task_update(
         token_data.schema_name, project_id, task, action="update",
@@ -112,7 +118,10 @@ async def reorder(
         related_task_id=task.id,
         related_project_id=project_id,
     )
-    await manager.broadcast_notification(token_data.schema_name, notification)
+    await manager.broadcast_notification(
+        token_data.schema_name, notification,
+        request_id=get_request_id(request)
+    )
     
     await manager.broadcast_task_update(
         token_data.schema_name, project_id, task, action="update",
@@ -142,7 +151,10 @@ async def remove(
             message=f"任务 \"{task.title}\" 已删除",
             related_project_id=project_id,
         )
-        await manager.broadcast_notification(token_data.schema_name, notification)
+        await manager.broadcast_notification(
+            token_data.schema_name, notification,
+            request_id=get_request_id(request)
+        )
     
     await manager.broadcast_task_delete(
         token_data.schema_name, project_id, task_id,

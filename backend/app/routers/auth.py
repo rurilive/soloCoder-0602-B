@@ -27,9 +27,37 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority VARCHAR(20) NOT NULL DEFAULT 'medium',
     due_date TIMESTAMPTZ,
     position INTEGER DEFAULT 0,
+    custom_field_values JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS custom_fields (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    field_type VARCHAR(20) NOT NULL,
+    required BOOLEAN NOT NULL DEFAULT FALSE,
+    options JSONB,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    related_task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+    related_project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_custom_fields_project_id ON custom_fields(project_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 """
 
 

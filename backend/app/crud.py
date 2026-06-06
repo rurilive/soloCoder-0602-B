@@ -1,4 +1,4 @@
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from app.models import TenantProject, TenantTask, TenantCustomField, TenantNotification
@@ -492,6 +492,6 @@ async def mark_all_notifications_read(db: AsyncSession) -> int:
 
 async def get_unread_notification_count(db: AsyncSession) -> int:
     result = await db.execute(
-        select(TenantNotification).where(TenantNotification.read == False)
+        select(func.count()).where(TenantNotification.read == False)
     )
-    return len(result.scalars().all())
+    return result.scalar_one() or 0

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { notificationAPI } from '../api';
+import { notificationAPI, generateRequestId, setRequestIdTracker } from '../api';
 import { useToast } from '../context/ToastContext';
 
 const NOTIFICATION_TYPE_CONFIG = {
@@ -9,6 +9,17 @@ const NOTIFICATION_TYPE_CONFIG = {
   task_deleted: { icon: '🗑️', color: '#dc3545' },
   default: { icon: '📢', color: '#6c757d' },
 };
+
+const recentRequestIds = new Set();
+
+export function trackRequestId(requestId) {
+  if (requestId) {
+    recentRequestIds.add(requestId);
+    setTimeout(() => {
+      recentRequestIds.delete(requestId);
+    }, 10000);
+  }
+}
 
 export default function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
@@ -39,6 +50,8 @@ export default function NotificationCenter() {
     fetchNotifications();
     fetchUnreadCount();
 
+    setRequestIdTracker(trackRequestId);
+
     const token = localStorage.getItem('token');
     if (!token) return;
 
@@ -52,6 +65,9 @@ export default function NotificationCenter() {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'notification') {
+          if (message.request_id && recentRequestIds.has(message.request_id)) {
+            return;
+          }
           const newNotification = message.data;
           setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
           setUnreadCount((prev) => prev + 1);

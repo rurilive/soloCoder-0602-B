@@ -190,6 +190,7 @@ class ConnectionManager:
         self,
         schema_name: str,
         notification: NotificationResponse,
+        request_id: str | None = None,
         exclude_websocket: WebSocket | None = None,
     ):
         key = self._get_notification_key(schema_name)
@@ -198,6 +199,7 @@ class ConnectionManager:
 
         message = {
             "type": "notification",
+            "request_id": request_id,
             "data": {
                 "id": notification.id,
                 "type": notification.type,
