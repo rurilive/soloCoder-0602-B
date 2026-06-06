@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { projectAPI, taskAPI, customFieldAPI, generateRequestId } from '../api';
+import { wsManager } from '../websocketManager';
 import TaskCard from './TaskCard';
 import Modal from './Modal';
 import CustomFieldManager from './CustomFieldManager';
@@ -52,8 +53,6 @@ export default function KanbanBoard() {
   const [selectMode, setSelectMode] = useState(false);
   const [bulkMoveStatus, setBulkMoveStatus] = useState('in_progress');
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
-  const wsRef = useRef(null);
-  const pendingRequestIdsRef = useRef(new Set());
 
   const fetchProject = async () => {
     try {
@@ -98,70 +97,53 @@ export default function KanbanBoard() {
     const token = localStorage.getItem('token');
     if (!token || !projectId) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/projects/${projectId}?token=${encodeURIComponent(token)}`;
+    wsManager.connectProject(projectId);
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    const unsubscribe = wsManager.on('project', (message) => {
+      if (message.type !== 'task_update') return;
 
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type !== 'task_update') return;
+      if (message.request_id && wsManager.isRequestPending(message.request_id)) {
+        wsManager.untrackRequestId(message.request_id);
+        return;
+      }
 
-        if (message.request_id && pendingRequestIdsRef.current.has(message.request_id)) {
-          pendingRequestIdsRef.current.delete(message.request_id);
-          return;
-        }
+      setTasks((prevTasks) => {
+        let newTasks = [...prevTasks];
 
-        setTasks((prevTasks) => {
-          let newTasks = [...prevTasks];
-
-          if (message.action === 'delete') {
-            newTasks = newTasks.filter((t) => t.id !== message.data.id);
-          } else if (message.action === 'bulk_delete') {
-            const deletedIds = new Set(message.data.task_ids);
-            newTasks = newTasks.filter((t) => !deletedIds.has(t.id));
-          } else if (message.action === 'create' || message.action === 'update') {
-            const taskData = message.data;
-            const existingIndex = newTasks.findIndex((t) => t.id === taskData.id);
-            if (existingIndex >= 0) {
-              newTasks[existingIndex] = { ...newTasks[existingIndex], ...taskData };
-            } else {
+        if (message.action === 'delete') {
+          newTasks = newTasks.filter((t) => t.id !== message.data.id);
+        } else if (message.action === 'bulk_delete') {
+          const deletedIds = new Set(message.data.task_ids);
+          newTasks = newTasks.filter((t) => !deletedIds.has(t.id));
+        } else if (message.action === 'create' || message.action === 'update') {
+          const taskData = message.data;
+          const existingIndex = newTasks.findIndex((t) => t.id === taskData.id);
+          if (existingIndex >= 0) {
+            newTasks[existingIndex] = { ...newTasks[existingIndex], ...taskData };
+          } else {
+            newTasks.push(taskData);
+          }
+        } else if (message.action === 'bulk_update') {
+          const taskMap = new Map(message.data.map((t) => [t.id, t]));
+          newTasks = newTasks.map((t) => {
+            if (taskMap.has(t.id)) {
+              return { ...t, ...taskMap.get(t.id) };
+            }
+            return t;
+          });
+          message.data.forEach((taskData) => {
+            if (!newTasks.find((t) => t.id === taskData.id)) {
               newTasks.push(taskData);
             }
-          } else if (message.action === 'bulk_update') {
-            const taskMap = new Map(message.data.map((t) => [t.id, t]));
-            newTasks = newTasks.map((t) => {
-              if (taskMap.has(t.id)) {
-                return { ...t, ...taskMap.get(t.id) };
-              }
-              return t;
-            });
-            message.data.forEach((taskData) => {
-              if (!newTasks.find((t) => t.id === taskData.id)) {
-                newTasks.push(taskData);
-              }
-            });
-          }
+          });
+        }
 
-          return newTasks;
-        });
-      } catch (e) {
-        console.error('WebSocket message parse error:', e);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-    };
+        return newTasks;
+      });
+    });
 
     return () => {
-      ws.close();
+      unsubscribe();
     };
   }, [projectId]);
 
@@ -177,7 +159,6 @@ export default function KanbanBoard() {
     if (!newTaskTitle.trim()) return;
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       const data = {
         title: newTaskTitle,
         status: newTaskStatus,
@@ -303,7 +284,6 @@ export default function KanbanBoard() {
     if (!window.confirm('确定删除此任务？')) return;
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.delete(projectId, taskId, {
         headers: { 'X-Request-ID': requestId }
       });
@@ -329,7 +309,6 @@ export default function KanbanBoard() {
     if (!editTask || !editTask.title.trim()) return;
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       const data = {
         title: editTask.title,
         description: editTask.description,
@@ -396,7 +375,6 @@ export default function KanbanBoard() {
 
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition }, {
         headers: { 'X-Request-ID': requestId }
       });
@@ -430,7 +408,6 @@ export default function KanbanBoard() {
     if (selectedTasks.size === 0) return;
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.bulkMove(projectId, {
         task_ids: Array.from(selectedTasks),
         new_status: bulkMoveStatus,
@@ -452,7 +429,6 @@ export default function KanbanBoard() {
     if (!window.confirm(`确定删除选中的 ${selectedTasks.size} 个任务？`)) return;
     try {
       const requestId = generateRequestId();
-      pendingRequestIdsRef.current.add(requestId);
       await taskAPI.bulkDelete(projectId, {
         task_ids: Array.from(selectedTasks),
       }, {

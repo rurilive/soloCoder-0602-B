@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { notificationAPI, generateRequestId, setRequestIdTracker } from '../api';
+import React, { useState, useEffect } from 'react';
+import { notificationAPI } from '../api';
+import { wsManager } from '../websocketManager';
 import { useToast } from '../context/ToastContext';
 
 const NOTIFICATION_TYPE_CONFIG = {
@@ -10,22 +11,10 @@ const NOTIFICATION_TYPE_CONFIG = {
   default: { icon: '📢', color: '#6c757d' },
 };
 
-const recentRequestIds = new Set();
-
-export function trackRequestId(requestId) {
-  if (requestId) {
-    recentRequestIds.add(requestId);
-    setTimeout(() => {
-      recentRequestIds.delete(requestId);
-    }, 10000);
-  }
-}
-
 export default function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const wsRef = useRef(null);
   const { showToast } = useToast();
 
   const fetchNotifications = async () => {
@@ -50,36 +39,20 @@ export default function NotificationCenter() {
     fetchNotifications();
     fetchUnreadCount();
 
-    setRequestIdTracker(trackRequestId);
-
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/notifications?token=${encodeURIComponent(token)}`;
+    wsManager.connectNotifications();
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'notification') {
-          if (message.request_id && recentRequestIds.has(message.request_id)) {
-            return;
-          }
-          const newNotification = message.data;
-          setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
-          setUnreadCount((prev) => prev + 1);
-          showToast(newNotification.title, 'info');
-        }
-      } catch (e) {
-        console.error('Notification WebSocket parse error:', e);
-      }
-    };
+    const unsubscribe = wsManager.on('notification', (message) => {
+      const newNotification = message.data;
+      setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
+      setUnreadCount((prev) => prev + 1);
+      showToast(newNotification.title, 'info');
+    });
 
     return () => {
-      ws.close();
+      unsubscribe();
     };
   }, []);
 

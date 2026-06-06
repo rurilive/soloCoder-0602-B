@@ -1,17 +1,12 @@
 import axios from 'axios';
+import { wsManager } from './websocketManager';
 
 const api = axios.create({
   baseURL: '/api',
 });
 
-let trackRequestIdFn = null;
-
 export function generateRequestId() {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-export function setRequestIdTracker(fn) {
-  trackRequestIdFn = fn;
 }
 
 api.interceptors.request.use((config) => {
@@ -22,15 +17,22 @@ api.interceptors.request.use((config) => {
   if (!config.headers['X-Request-ID']) {
     config.headers['X-Request-ID'] = generateRequestId();
   }
-  if (trackRequestIdFn) {
-    trackRequestIdFn(config.headers['X-Request-ID']);
-  }
+  wsManager.trackRequestId(config.headers['X-Request-ID']);
   return config;
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const requestId = res.config.headers['X-Request-ID'];
+    if (requestId) {
+      wsManager.untrackRequestId(requestId);
+    }
+    return res;
+  },
   (err) => {
+    if (err.config?.headers['X-Request-ID']) {
+      wsManager.untrackRequestId(err.config.headers['X-Request-ID']);
+    }
     if (err.response?.status === 401) {
       localStorage.removeItem('token');
       window.location.href = '/login';
