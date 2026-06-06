@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 VALID_STATUSES = ("todo", "in_progress", "done")
@@ -23,10 +23,10 @@ class CompanyResponse(BaseModel):
     name: str
     email: str
     created_at: datetime
+    token_version: int = Field(exclude=True, default=0)
 
     model_config = {
-        "from_attributes": True,
-        "exclude": {"token_version"}
+        "from_attributes": True
     }
 
 
@@ -67,7 +67,28 @@ class TaskCreate(BaseModel):
     description: Optional[str] = ""
     status: Optional[str] = Field("todo", pattern="^(todo|in_progress|done)$")
     priority: Optional[str] = Field("medium", pattern="^(low|medium|high)$")
-    due_date: Optional[datetime] = None
+    due_date: Optional[str] = None
+
+    @field_validator("due_date")
+    @classmethod
+    def parse_due_date(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                return v.replace(tzinfo=timezone.utc)
+            return v
+        if isinstance(v, str):
+            if len(v) == 10:
+                v = f"{v}T00:00:00Z"
+            try:
+                dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except ValueError:
+                raise ValueError(f"Invalid date format: {v}")
+        return v
 
 
 class TaskUpdate(BaseModel):
@@ -75,8 +96,29 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(todo|in_progress|done)$")
     priority: Optional[str] = Field(None, pattern="^(low|medium|high)$")
-    due_date: Optional[datetime] = None
+    due_date: Optional[str] = None
     position: Optional[int] = None
+
+    @field_validator("due_date")
+    @classmethod
+    def parse_due_date(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                return v.replace(tzinfo=timezone.utc)
+            return v
+        if isinstance(v, str):
+            if len(v) == 10:
+                v = f"{v}T00:00:00Z"
+            try:
+                dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except ValueError:
+                raise ValueError(f"Invalid date format: {v}")
+        return v
 
 
 class TaskResponse(BaseModel):
