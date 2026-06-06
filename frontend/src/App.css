@@ -677,3 +677,55 @@ body {
   outline: none;
   border-color: #4361ee;
 }
+
+.kanban-header-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.kanban-header-actions .btn-outline {
+  color: #4361ee;
+  border-color: #4361ee;
+}
+
+.kanban-header-actions .btn-outline:hover {
+  background: #4361ee;
+  color: white;
+}
+
+.kanban-header-actions .btn-primary {
+  background: #4361ee;
+}
+
+.kanban-header-actions .btn-danger {
+  background: #e63946;
+}
+
+.kanban-header-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.task-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4361ee;
+}
+
+.task-card-wrapper {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.task-card-wrapper:has(.task-checkbox:checked) .task-card {
+  border-color: #4361ee;
+  background: #f0f4ff;
+}
+

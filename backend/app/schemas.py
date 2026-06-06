@@ -96,3 +96,12 @@ class TaskReorder(BaseModel):
     task_id: int
     new_status: str = Field(..., pattern="^(todo|in_progress|done)$")
     new_position: int
+
+
+class BulkTaskMove(BaseModel):
+    task_ids: list[int]
+    new_status: str = Field(..., pattern="^(todo|in_progress|done)$")
+
+
+class BulkTaskDelete(BaseModel):
+    task_ids: list[int]

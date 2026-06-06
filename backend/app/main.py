@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import async_engine, AsyncSessionLocal
 from app.models import Company, Base
-from app.routers import auth, projects, tasks
+from app.routers import auth, projects, tasks, websocket
 
 
 async def init_public_tables():
@@ -22,7 +22,7 @@ app = FastAPI(title="Multi-Tenant Task Manager", version="0.1.0", lifespan=lifes
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:2222"],
+    allow_origins=["http://localhost:2222", "ws://localhost:2222"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,6 +31,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
+app.include_router(websocket.router)
 
 
 @app.get("/api/health")

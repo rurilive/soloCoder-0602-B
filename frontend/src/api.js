@@ -27,6 +27,7 @@ export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  deleteTenant: () => api.delete('/auth/me'),
 };
 
 export const projectAPI = {
@@ -44,6 +45,8 @@ export const taskAPI = {
   update: (projectId, taskId, data) => api.put(`/projects/${projectId}/tasks/${taskId}`, data),
   reorder: (projectId, taskId, data) => api.put(`/projects/${projectId}/tasks/${taskId}/reorder`, data),
   delete: (projectId, taskId) => api.delete(`/projects/${projectId}/tasks/${taskId}`),
+  bulkMove: (projectId, data) => api.post(`/projects/${projectId}/tasks/bulk/move`, data),
+  bulkDelete: (projectId, data) => api.post(`/projects/${projectId}/tasks/bulk/delete`, data),
 };
 
 export default api;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { projectAPI, taskAPI } from '../api';
@@ -44,6 +44,12 @@ export default function KanbanBoard() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [editTask, setEditTask] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedTasks, setSelectedTasks] = useState(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [bulkMoveStatus, setBulkMoveStatus] = useState('in_progress');
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const wsRef = useRef(null);
+  const isLocalUpdateRef = useRef(false);
 
   const fetchProject = async () => {
     try {
@@ -68,6 +74,77 @@ export default function KanbanBoard() {
     fetchTasks();
   }, [projectId]);
 
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || !projectId) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/projects/${projectId}?token=${encodeURIComponent(token)}`;
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      if (isLocalUpdateRef.current) {
+        isLocalUpdateRef.current = false;
+        return;
+      }
+
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type !== 'task_update') return;
+
+        setTasks((prevTasks) => {
+          let newTasks = [...prevTasks];
+
+          if (message.action === 'delete') {
+            newTasks = newTasks.filter((t) => t.id !== message.data.id);
+          } else if (message.action === 'bulk_delete') {
+            const deletedIds = new Set(message.data.task_ids);
+            newTasks = newTasks.filter((t) => !deletedIds.has(t.id));
+          } else if (message.action === 'create' || message.action === 'update') {
+            const taskData = message.data;
+            const existingIndex = newTasks.findIndex((t) => t.id === taskData.id);
+            if (existingIndex >= 0) {
+              newTasks[existingIndex] = { ...newTasks[existingIndex], ...taskData };
+            } else {
+              newTasks.push(taskData);
+            }
+          } else if (message.action === 'bulk_update') {
+            const taskMap = new Map(message.data.map((t) => [t.id, t]));
+            newTasks = newTasks.map((t) => {
+              if (taskMap.has(t.id)) {
+                return { ...t, ...taskMap.get(t.id) };
+              }
+              return t;
+            });
+            message.data.forEach((taskData) => {
+              if (!newTasks.find((t) => t.id === taskData.id)) {
+                newTasks.push(taskData);
+              }
+            });
+          }
+
+          return newTasks;
+        });
+      } catch (e) {
+        console.error('WebSocket message parse error:', e);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [projectId]);
+
   const getTasksByStatus = useCallback((status) => {
     return tasks
       .filter((t) => t.status === status)
@@ -87,6 +164,7 @@ export default function KanbanBoard() {
       if (newTaskDueDate) {
         data.due_date = newTaskDueDate;
       }
+      isLocalUpdateRef.current = true;
       await taskAPI.create(projectId, data);
       setNewTaskTitle('');
       setNewTaskDueDate('');
@@ -101,6 +179,7 @@ export default function KanbanBoard() {
   const handleDeleteTask = async (taskId) => {
     if (!window.confirm('确定删除此任务？')) return;
     try {
+      isLocalUpdateRef.current = true;
       await taskAPI.delete(projectId, taskId);
       fetchTasks();
       showToast('任务删除成功', 'success');
@@ -127,6 +206,7 @@ export default function KanbanBoard() {
       if (editTask.due_date) {
         data.due_date = editTask.due_date;
       }
+      isLocalUpdateRef.current = true;
       await taskAPI.update(projectId, editTask.id, data);
       setEditModalOpen(false);
       setEditTask(null);
@@ -178,10 +258,66 @@ export default function KanbanBoard() {
     setTasks(newTasks);
 
     try {
+      isLocalUpdateRef.current = true;
       await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition });
     } catch {
       setTasks(oldTasks);
       showToast('移动任务失败', 'error');
+    }
+  };
+
+  const toggleTaskSelection = (taskId) => {
+    setSelectedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedTasks.size === tasks.length) {
+      setSelectedTasks(new Set());
+    } else {
+      setSelectedTasks(new Set(tasks.map((t) => t.id)));
+    }
+  };
+
+  const handleBulkMove = async () => {
+    if (selectedTasks.size === 0) return;
+    try {
+      isLocalUpdateRef.current = true;
+      await taskAPI.bulkMove(projectId, {
+        task_ids: Array.from(selectedTasks),
+        new_status: bulkMoveStatus,
+      });
+      setSelectedTasks(new Set());
+      setSelectMode(false);
+      setBulkModalOpen(false);
+      fetchTasks();
+      showToast('批量移动成功', 'success');
+    } catch {
+      showToast('批量移动失败', 'error');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTasks.size === 0) return;
+    if (!window.confirm(`确定删除选中的 ${selectedTasks.size} 个任务？`)) return;
+    try {
+      isLocalUpdateRef.current = true;
+      await taskAPI.bulkDelete(projectId, {
+        task_ids: Array.from(selectedTasks),
+      });
+      setSelectedTasks(new Set());
+      setSelectMode(false);
+      fetchTasks();
+      showToast('批量删除成功', 'success');
+    } catch {
+      showToast('批量删除失败', 'error');
     }
   };
 
@@ -192,6 +328,28 @@ export default function KanbanBoard() {
       <div className="kanban-header">
         <button className="btn btn-outline" onClick={() => navigate('/')}>← 返回</button>
         <h2>{project.name}</h2>
+        <div className="kanban-header-actions">
+          {selectMode ? (
+            <>
+              <button className="btn btn-outline" onClick={handleSelectAll}>
+                {selectedTasks.size === tasks.length ? '取消全选' : '全选'}
+              </button>
+              <button className="btn btn-primary" onClick={() => setBulkModalOpen(true)} disabled={selectedTasks.size === 0}>
+                批量移动 ({selectedTasks.size})
+              </button>
+              <button className="btn btn-danger" onClick={handleBulkDelete} disabled={selectedTasks.size === 0}>
+                批量删除 ({selectedTasks.size})
+              </button>
+              <button className="btn btn-outline" onClick={() => { setSelectMode(false); setSelectedTasks(new Set()); }}>
+                取消选择
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-outline" onClick={() => setSelectMode(true)}>
+              批量操作
+            </button>
+          )}
+        </div>
       </div>
 
       <form className="add-task-form" onSubmit={handleAddTask}>
@@ -258,6 +416,15 @@ export default function KanbanBoard() {
                               {...provided.dragHandleProps}
                               className={`task-card-wrapper${snapshot.isDragging ? ' dragging' : ''}`}
                             >
+                              {selectMode && (
+                                <input
+                                  type="checkbox"
+                                  className="task-checkbox"
+                                  checked={selectedTasks.has(task.id)}
+                                  onChange={() => toggleTaskSelection(task.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              )}
                               <TaskCard task={task} onDelete={handleDeleteTask} onEdit={handleEditTask} />
                             </div>
                           )}
@@ -332,6 +499,29 @@ export default function KanbanBoard() {
             <button type="submit" className="btn btn-primary">保存</button>
           </div>
         </form>
+      </Modal>
+
+      <Modal isOpen={bulkModalOpen} onClose={() => setBulkModalOpen(false)} title="批量移动任务">
+        <div className="form-group">
+          <label>移动到状态</label>
+          <select
+            value={bulkMoveStatus}
+            onChange={(e) => setBulkMoveStatus(e.target.value)}
+          >
+            {TASK_STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+        <p>已选择 {selectedTasks.size} 个任务</p>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-outline" onClick={() => setBulkModalOpen(false)}>
+            取消
+          </button>
+          <button type="button" className="btn btn-primary" onClick={handleBulkMove}>
+            确认移动
+          </button>
+        </div>
       </Modal>
     </div>
   );

@@ -83,3 +83,23 @@ async def me(token_data: TokenData = Depends(get_current_user)):
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
         return company
+
+
+@router.delete("/me")
+async def delete_tenant(token_data: TokenData = Depends(get_current_user)):
+    schema_name = validate_schema_name(token_data.schema_name)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Company).where(Company.id == token_data.company_id))
+        company = result.scalar_one_or_none()
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        try:
+            await db.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+            await db.delete(company)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to delete tenant")
+
+    return {"detail": "Tenant deleted successfully"}

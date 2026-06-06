@@ -214,3 +214,144 @@ async def delete_task(db: AsyncSession, task_id: int, project_id: int) -> bool:
     except SQLAlchemyError:
         await db.rollback()
         return False
+
+
+async def bulk_move_tasks(
+    db: AsyncSession,
+    project_id: int,
+    task_ids: list[int],
+    new_status: str,
+) -> list[TenantTask]:
+    try:
+        async with db.begin_nested():
+            result = await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.id.in_(task_ids))
+                .order_by(TenantTask.status, TenantTask.position)
+                .with_for_update()
+            )
+            tasks_to_move = result.scalars().all()
+            if not tasks_to_move:
+                return []
+
+            affected_statuses = set(task.status for task in tasks_to_move)
+            affected_statuses.add(new_status)
+
+            await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.status.in_(list(affected_statuses)))
+                .with_for_update()
+            )
+
+            source_updates = {}
+            for task in tasks_to_move:
+                old_status = task.status
+                if old_status not in source_updates:
+                    source_updates[old_status] = []
+                source_updates[old_status].append(task)
+
+            moved_ids = {task.id for task in tasks_to_move}
+            for old_status in source_updates:
+                remaining_result = await db.execute(
+                    select(TenantTask)
+                    .where(TenantTask.project_id == project_id)
+                    .where(TenantTask.status == old_status)
+                    .where(~TenantTask.id.in_(list(moved_ids)))
+                    .order_by(TenantTask.position)
+                )
+                remaining = remaining_result.scalars().all()
+                for idx, task in enumerate(remaining):
+                    task.position = idx
+
+            dest_result = await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.status == new_status)
+                .where(~TenantTask.id.in_(list(moved_ids)))
+                .order_by(TenantTask.position)
+            )
+            dest_tasks = dest_result.scalars().all()
+
+            for idx, task in enumerate(tasks_to_move):
+                task.status = new_status
+                task.position = len(dest_tasks) + idx
+
+            all_updated = []
+            for old_status in source_updates:
+                remaining_result = await db.execute(
+                    select(TenantTask)
+                    .where(TenantTask.project_id == project_id)
+                    .where(TenantTask.status == old_status)
+                )
+                all_updated.extend(remaining_result.scalars().all())
+
+            dest_updated_result = await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.status == new_status)
+                .order_by(TenantTask.position)
+            )
+            all_updated.extend(dest_updated_result.scalars().all())
+
+            await db.commit()
+            return all_updated
+    except SQLAlchemyError:
+        await db.rollback()
+        raise
+
+
+async def bulk_delete_tasks(
+    db: AsyncSession,
+    project_id: int,
+    task_ids: list[int],
+) -> dict:
+    try:
+        async with db.begin_nested():
+            result = await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.id.in_(task_ids))
+                .with_for_update()
+            )
+            tasks_to_delete = result.scalars().all()
+            if not tasks_to_delete:
+                return {"deleted_count": 0, "updated_tasks": []}
+
+            affected_statuses = set(task.status for task in tasks_to_delete)
+
+            await db.execute(
+                select(TenantTask)
+                .where(TenantTask.project_id == project_id)
+                .where(TenantTask.status.in_(list(affected_statuses)))
+                .with_for_update()
+            )
+
+            deleted_ids = {task.id for task in tasks_to_delete}
+            for task in tasks_to_delete:
+                await db.delete(task)
+
+            updated_tasks = []
+            for status in affected_statuses:
+                remaining_result = await db.execute(
+                    select(TenantTask)
+                    .where(TenantTask.project_id == project_id)
+                    .where(TenantTask.status == status)
+                    .where(~TenantTask.id.in_(list(deleted_ids)))
+                    .order_by(TenantTask.position)
+                )
+                remaining = remaining_result.scalars().all()
+                for idx, task in enumerate(remaining):
+                    task.position = idx
+                updated_tasks.extend(remaining)
+
+            await db.commit()
+            return {
+                "deleted_count": len(tasks_to_delete),
+                "deleted_ids": list(deleted_ids),
+                "updated_tasks": updated_tasks,
+            }
+    except SQLAlchemyError:
+        await db.rollback()
+        raise
