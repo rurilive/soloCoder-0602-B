@@ -45,8 +45,9 @@ export default function NotificationCenter() {
     wsManager.connectNotifications();
 
     const unsubscribe = wsManager.on('notification', (message) => {
-      if (message.type !== 'notification' || !message.data) return;
+      if (message.type !== 'notification' || !message.data || typeof message.data !== 'object') return;
       const newNotification = message.data;
+      if (!newNotification.id) return;
       setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
       setUnreadCount((prev) => prev + 1);
       if (newNotification.title) {
