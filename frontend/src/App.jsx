@@ -4,6 +4,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import ProjectList from './components/ProjectList';
 import KanbanBoard from './components/KanbanBoard';
+import NotificationCenter from './components/NotificationCenter';
 import { authAPI } from './api';
 import { ToastProvider } from './context/ToastContext';
 
@@ -37,6 +38,7 @@ function Navbar({ companyName, onLogout }) {
       <div className="navbar-brand">任务管理系统</div>
       {companyName && (
         <div className="navbar-right">
+          <NotificationCenter />
           <span className="navbar-user">{companyName}</span>
           <button className="btn btn-outline" onClick={onLogout}>退出</button>
         </div>

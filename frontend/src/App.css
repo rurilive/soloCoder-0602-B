@@ -762,3 +762,331 @@ body {
   box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.1);
 }
 
+.notification-center {
+  position: relative;
+}
+
+.notification-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  position: relative;
+  color: white;
+  transition: background 0.15s;
+}
+
+.notification-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.notification-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #e63946;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.notification-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  width: 360px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e8ecf0;
+}
+
+.notification-header h3 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #4361ee;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.notification-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.notification-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+}
+
+.notification-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #f0f2f5;
+  position: relative;
+}
+
+.notification-item:hover {
+  background: #f8f9fb;
+}
+
+.notification-item.unread {
+  background: #f0f4ff;
+}
+
+.notification-item.unread:hover {
+  background: #e6edff;
+}
+
+.notification-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.notification-message {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.notification-time {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+}
+
+.notification-dot {
+  width: 8px;
+  height: 8px;
+  background: #4361ee;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.notification-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+}
+
+.custom-field-manager {
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e8ecf0;
+}
+
+.field-manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.field-manager-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-empty {
+  text-align: center;
+  padding: 20px;
+  color: #999;
+  font-size: 14px;
+}
+
+.field-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8f9fb;
+  border-radius: 8px;
+}
+
+.field-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.field-type-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #e8ecf0;
+  border-radius: 10px;
+  color: #666;
+}
+
+.field-required-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #ffebee;
+  color: #e63946;
+  border-radius: 10px;
+}
+
+.field-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.field-actions .btn-outline {
+  color: #666;
+  border-color: #d0d5dd;
+}
+
+.field-actions .btn-outline:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.option-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.option-input-row input {
+  flex: 1;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  cursor: pointer;
+}
+
+.multiselect-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.custom-field-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-field-input label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+}
+
+.task-custom-fields {
+  margin: 8px 0;
+  padding-top: 8px;
+  border-top: 1px solid #f0f2f5;
+}
+
+.task-custom-field {
+  font-size: 12px;
+  margin-bottom: 4px;
+  display: flex;
+  gap: 4px;
+}
+
+.custom-field-label {
+  color: #888;
+  font-weight: 500;
+}
+
+.custom-field-value {
+  color: #333;
+}
+
+.add-task-form {
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.add-task-form .custom-field-input {
+  min-width: 150px;
+}
+

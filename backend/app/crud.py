@@ -1,8 +1,8 @@
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
-from app.models import TenantProject, TenantTask
-from app.schemas import ProjectCreate, ProjectUpdate, TaskCreate, TaskUpdate
+from app.models import TenantProject, TenantTask, TenantCustomField, TenantNotification
+from app.schemas import ProjectCreate, ProjectUpdate, TaskCreate, TaskUpdate, CustomFieldCreate, CustomFieldUpdate
 
 
 async def create_project(db: AsyncSession, data: ProjectCreate) -> TenantProject:
@@ -65,6 +65,7 @@ async def create_task(db: AsyncSession, project_id: int, data: TaskCreate) -> Te
         priority=data.priority or "medium",
         due_date=data.due_date,
         position=next_pos,
+        custom_field_values=data.custom_field_values or {},
     )
     db.add(task)
     await db.commit()
@@ -108,6 +109,10 @@ async def update_task(db: AsyncSession, task_id: int, project_id: int, data: Tas
         task.due_date = data.due_date
     if data.position is not None:
         task.position = data.position
+    if data.custom_field_values is not None:
+        current_values = task.custom_field_values or {}
+        current_values.update(data.custom_field_values)
+        task.custom_field_values = current_values
     await db.commit()
     await db.refresh(task)
     return task
@@ -355,3 +360,138 @@ async def bulk_delete_tasks(
     except SQLAlchemyError:
         await db.rollback()
         raise
+
+
+async def create_custom_field(db: AsyncSession, project_id: int, data: CustomFieldCreate) -> TenantCustomField | None:
+    project = await get_project(db, project_id)
+    if not project:
+        return None
+    result = await db.execute(
+        select(TenantCustomField)
+        .where(TenantCustomField.project_id == project_id)
+        .order_by(TenantCustomField.position.desc())
+    )
+    last_field = result.scalars().first()
+    next_pos = (last_field.position + 1) if last_field else 0
+    field = TenantCustomField(
+        project_id=project_id,
+        name=data.name,
+        field_type=data.field_type,
+        required=data.required or False,
+        options=data.options,
+        position=data.position if data.position is not None else next_pos,
+    )
+    db.add(field)
+    await db.commit()
+    await db.refresh(field)
+    return field
+
+
+async def get_custom_fields_by_project(db: AsyncSession, project_id: int):
+    result = await db.execute(
+        select(TenantCustomField)
+        .where(TenantCustomField.project_id == project_id)
+        .order_by(TenantCustomField.position, TenantCustomField.created_at)
+    )
+    return result.scalars().all()
+
+
+async def get_custom_field(db: AsyncSession, field_id: int, project_id: int) -> TenantCustomField | None:
+    result = await db.execute(
+        select(TenantCustomField)
+        .where(TenantCustomField.id == field_id)
+        .where(TenantCustomField.project_id == project_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def update_custom_field(db: AsyncSession, field_id: int, project_id: int, data: CustomFieldUpdate) -> TenantCustomField | None:
+    field = await get_custom_field(db, field_id, project_id)
+    if not field:
+        return None
+    if data.name is not None:
+        field.name = data.name
+    if data.field_type is not None:
+        field.field_type = data.field_type
+    if data.required is not None:
+        field.required = data.required
+    if data.options is not None:
+        field.options = data.options
+    if data.position is not None:
+        field.position = data.position
+    await db.commit()
+    await db.refresh(field)
+    return field
+
+
+async def delete_custom_field(db: AsyncSession, field_id: int, project_id: int) -> bool:
+    field = await get_custom_field(db, field_id, project_id)
+    if not field:
+        return False
+    await db.delete(field)
+    await db.commit()
+    return True
+
+
+async def create_notification(
+    db: AsyncSession,
+    type: str,
+    title: str,
+    message: str,
+    related_task_id: int | None = None,
+    related_project_id: int | None = None,
+) -> TenantNotification:
+    notification = TenantNotification(
+        type=type,
+        title=title,
+        message=message,
+        related_task_id=related_task_id,
+        related_project_id=related_project_id,
+    )
+    db.add(notification)
+    await db.commit()
+    await db.refresh(notification)
+    return notification
+
+
+async def get_notifications(db: AsyncSession, limit: int = 50, unread_only: bool = False):
+    query = select(TenantNotification)
+    if unread_only:
+        query = query.where(TenantNotification.read == False)
+    query = query.order_by(TenantNotification.created_at.desc()).limit(limit)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+async def get_notification(db: AsyncSession, notification_id: int) -> TenantNotification | None:
+    result = await db.execute(
+        select(TenantNotification).where(TenantNotification.id == notification_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_notification_read(db: AsyncSession, notification_id: int, read: bool = True) -> TenantNotification | None:
+    notification = await get_notification(db, notification_id)
+    if not notification:
+        return None
+    notification.read = read
+    await db.commit()
+    await db.refresh(notification)
+    return notification
+
+
+async def mark_all_notifications_read(db: AsyncSession) -> int:
+    result = await db.execute(
+        update(TenantNotification)
+        .where(TenantNotification.read == False)
+        .values(read=True)
+    )
+    await db.commit()
+    return result.rowcount or 0
+
+
+async def get_unread_notification_count(db: AsyncSession) -> int:
+    result = await db.execute(
+        select(TenantNotification).where(TenantNotification.read == False)
+    )
+    return len(result.scalars().all())

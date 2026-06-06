@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import async_engine, AsyncSessionLocal
 from app.models import Company, Base
-from app.routers import auth, projects, tasks, websocket
+from app.routers import auth, projects, tasks, websocket, custom_fields, notifications
 
 
 async def init_public_tables():
@@ -32,6 +32,8 @@ app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
 app.include_router(websocket.router)
+app.include_router(custom_fields.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/health")

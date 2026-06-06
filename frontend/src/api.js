@@ -56,4 +56,20 @@ export const taskAPI = {
   bulkDelete: (projectId, data) => api.post(`/projects/${projectId}/tasks/bulk/delete`, data),
 };
 
+export const customFieldAPI = {
+  list: (projectId) => api.get(`/projects/${projectId}/custom-fields`),
+  get: (projectId, fieldId) => api.get(`/projects/${projectId}/custom-fields/${fieldId}`),
+  create: (projectId, data) => api.post(`/projects/${projectId}/custom-fields`, data),
+  update: (projectId, fieldId, data) => api.put(`/projects/${projectId}/custom-fields/${fieldId}`, data),
+  delete: (projectId, fieldId) => api.delete(`/projects/${projectId}/custom-fields/${fieldId}`),
+};
+
+export const notificationAPI = {
+  list: (params = {}) => api.get('/notifications', { params }),
+  unreadCount: () => api.get('/notifications/unread-count'),
+  get: (id) => api.get(`/notifications/${id}`),
+  markRead: (id, read = true) => api.put(`/notifications/${id}/read`, { read }),
+  markAllRead: () => api.put('/notifications/read-all'),
+};
+
 export default api;

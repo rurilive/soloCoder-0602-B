@@ -1,10 +1,11 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, Any, Dict, List
 from datetime import datetime, timezone
 
 
 VALID_STATUSES = ("todo", "in_progress", "done")
 VALID_PRIORITIES = ("low", "medium", "high")
+VALID_FIELD_TYPES = ("text", "number", "date", "select", "multiselect", "checkbox")
 
 
 class CompanyRegister(BaseModel):
@@ -103,6 +104,7 @@ class TaskCreate(BaseModel):
     status: Optional[str] = Field("todo", pattern="^(todo|in_progress|done)$")
     priority: Optional[str] = Field("medium", pattern="^(low|medium|high)$")
     due_date: Optional[datetime] = None
+    custom_field_values: Optional[Dict[str, Any]] = None
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -117,6 +119,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     due_date: Optional[datetime] = None
     position: Optional[int] = None
+    custom_field_values: Optional[Dict[str, Any]] = None
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -133,6 +136,7 @@ class TaskResponse(BaseModel):
     priority: str
     due_date: Optional[datetime]
     position: int
+    custom_field_values: Dict[str, Any] = {}
     created_at: datetime
     updated_at: datetime
 
@@ -153,3 +157,52 @@ class BulkTaskMove(BaseModel):
 
 class BulkTaskDelete(BaseModel):
     task_ids: list[int]
+
+
+class CustomFieldCreate(BaseModel):
+    name: str
+    field_type: str = Field(..., pattern="^(text|number|date|select|multiselect|checkbox)$")
+    required: Optional[bool] = False
+    options: Optional[List[str]] = None
+    position: Optional[int] = 0
+
+
+class CustomFieldUpdate(BaseModel):
+    name: Optional[str] = None
+    field_type: Optional[str] = Field(None, pattern="^(text|number|date|select|multiselect|checkbox)$")
+    required: Optional[bool] = None
+    options: Optional[List[str]] = None
+    position: Optional[int] = None
+
+
+class CustomFieldResponse(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    field_type: str
+    required: bool
+    options: Optional[List[str]]
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    type: str
+    title: str
+    message: str
+    related_task_id: Optional[int]
+    related_project_id: Optional[int]
+    read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationMarkRead(BaseModel):
+    read: bool = True

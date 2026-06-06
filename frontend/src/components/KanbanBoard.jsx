@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import { projectAPI, taskAPI, generateRequestId } from '../api';
+import { projectAPI, taskAPI, customFieldAPI, generateRequestId } from '../api';
 import TaskCard from './TaskCard';
 import Modal from './Modal';
+import CustomFieldManager from './CustomFieldManager';
 import { useToast } from '../context/ToastContext';
 
 const COLUMNS = [
@@ -37,10 +38,13 @@ export default function KanbanBoard() {
   const { showToast } = useToast();
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [customFields, setCustomFields] = useState([]);
+  const [showFieldManager, setShowFieldManager] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskStatus, setNewTaskStatus] = useState('todo');
   const [newTaskPriority, setNewTaskPriority] = useState('medium');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [newTaskCustomFields, setNewTaskCustomFields] = useState({});
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [editTask, setEditTask] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -69,10 +73,26 @@ export default function KanbanBoard() {
     }
   };
 
+  const fetchCustomFields = async () => {
+    try {
+      const res = await customFieldAPI.list(projectId);
+      setCustomFields(res.data);
+    } catch {
+      // 静默失败，可能是新项目还没有自定义字段
+    }
+  };
+
   useEffect(() => {
     fetchProject();
     fetchTasks();
+    fetchCustomFields();
   }, [projectId]);
+
+  useEffect(() => {
+    if (showFieldManager && projectId) {
+      fetchCustomFields();
+    }
+  }, [showFieldManager]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -166,16 +186,116 @@ export default function KanbanBoard() {
       if (newTaskDueDate) {
         data.due_date = newTaskDueDate;
       }
+      if (Object.keys(newTaskCustomFields).length > 0) {
+        data.custom_field_values = newTaskCustomFields;
+      }
       await taskAPI.create(projectId, data, {
         headers: { 'X-Request-ID': requestId }
       });
       setNewTaskTitle('');
       setNewTaskDueDate('');
       setNewTaskPriority('medium');
+      setNewTaskCustomFields({});
       fetchTasks();
       showToast('任务创建成功', 'success');
     } catch {
       showToast('创建任务失败', 'error');
+    }
+  };
+
+  const handleCustomFieldChange = (fieldId, value, isEdit = false) => {
+    if (isEdit) {
+      setEditTask((prev) => ({
+        ...prev,
+        custom_field_values: {
+          ...(prev.custom_field_values || {}),
+          [fieldId]: value,
+        },
+      }));
+    } else {
+      setNewTaskCustomFields((prev) => ({
+        ...prev,
+        [fieldId]: value,
+      }));
+    }
+  };
+
+  const renderCustomFieldInput = (field, values, isEdit = false) => {
+    const currentValue = values ? values[field.id] : '';
+    
+    switch (field.field_type) {
+      case 'text':
+        return (
+          <input
+            type="text"
+            value={currentValue || ''}
+            onChange={(e) => handleCustomFieldChange(field.id, e.target.value, isEdit)}
+            placeholder={`输入${field.name}`}
+          />
+        );
+      case 'number':
+        return (
+          <input
+            type="number"
+            value={currentValue || ''}
+            onChange={(e) => handleCustomFieldChange(field.id, e.target.value ? Number(e.target.value) : '', isEdit)}
+            placeholder={`输入${field.name}`}
+          />
+        );
+      case 'date':
+        return (
+          <input
+            type="date"
+            value={currentValue || ''}
+            onChange={(e) => handleCustomFieldChange(field.id, e.target.value, isEdit)}
+          />
+        );
+      case 'checkbox':
+        return (
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={!!currentValue}
+              onChange={(e) => handleCustomFieldChange(field.id, e.target.checked, isEdit)}
+            />
+            {field.name}
+          </label>
+        );
+      case 'select':
+        return (
+          <select
+            value={currentValue || ''}
+            onChange={(e) => handleCustomFieldChange(field.id, e.target.value, isEdit)}
+          >
+            <option value="">请选择</option>
+            {(field.options || []).map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        );
+      case 'multiselect':
+          const selectedValues = Array.isArray(currentValue) ? currentValue : [];
+          return (
+            <div className="multiselect-wrapper">
+              {(field.options || []).map((opt) => (
+              <label key={opt} className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={selectedValues.includes(opt)}
+                  onChange={(e) => {
+                    const newValues = e.target.checked
+                      ? [...selectedValues, opt]
+                      : selectedValues.filter((v) => v !== opt);
+                    handleCustomFieldChange(field.id, newValues, isEdit);
+                  }}
+                />
+                {opt}
+              </label>
+            ))}
+            </div>
+          );
+        default:
+          return null;
     }
   };
 
@@ -218,6 +338,9 @@ export default function KanbanBoard() {
       };
       if (editTask.due_date) {
         data.due_date = editTask.due_date;
+      }
+      if (editTask.custom_field_values) {
+        data.custom_field_values = editTask.custom_field_values;
       }
       await taskAPI.update(projectId, editTask.id, data, {
         headers: { 'X-Request-ID': requestId }
@@ -352,6 +475,12 @@ export default function KanbanBoard() {
         <button className="btn btn-outline" onClick={() => navigate('/')}>← 返回</button>
         <h2>{project.name}</h2>
         <div className="kanban-header-actions">
+          <button 
+            className="btn btn-outline" 
+            onClick={() => setShowFieldManager(!showFieldManager)}
+          >
+            {showFieldManager ? '隐藏字段管理' : '📋 自定义字段'}
+          </button>
           <div className="priority-filter-wrapper">
             <label>优先级筛选:</label>
             <select
@@ -387,6 +516,12 @@ export default function KanbanBoard() {
         </div>
       </div>
 
+      <CustomFieldManager 
+        projectId={projectId} 
+        isOpen={showFieldManager} 
+        onClose={() => setShowFieldManager(false)} 
+      />
+
       <form className="add-task-form" onSubmit={handleAddTask}>
         <input
           type="text"
@@ -411,6 +546,12 @@ export default function KanbanBoard() {
           value={newTaskDueDate}
           onChange={(e) => setNewTaskDueDate(e.target.value)}
         />
+        {customFields.map((field) => (
+          <div key={field.id} className="custom-field-input">
+            <label>{field.name}{field.required && ' *'}</label>
+            {renderCustomFieldInput(field, newTaskCustomFields, false)}
+          </div>
+        ))}
         <button type="submit" className="btn btn-primary">添加任务</button>
       </form>
 
@@ -451,7 +592,12 @@ export default function KanbanBoard() {
                                   onClick={(e) => e.stopPropagation()}
                                 />
                               )}
-                              <TaskCard task={task} onDelete={handleDeleteTask} onEdit={handleEditTask} />
+                              <TaskCard 
+                                task={task} 
+                                onDelete={handleDeleteTask} 
+                                onEdit={handleEditTask} 
+                                customFields={customFields}
+                              />
                             </div>
                           )}
                         </Draggable>
@@ -518,6 +664,12 @@ export default function KanbanBoard() {
               onChange={(e) => setEditTask({ ...editTask, due_date: e.target.value })}
             />
           </div>
+          {customFields.map((field) => (
+            <div key={field.id} className="form-group">
+              <label>{field.name}{field.required && ' *'}</label>
+              {renderCustomFieldInput(field, editTask?.custom_field_values, true)}
+            </div>
+          ))}
           <div className="modal-actions">
             <button type="button" className="btn btn-outline" onClick={() => setEditModalOpen(false)}>
               取消
