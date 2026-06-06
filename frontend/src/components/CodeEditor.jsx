@@ -70,8 +70,6 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
     editorRef.current = editor
     monacoRef.current = monaco
 
-    setupBinding(editor, monaco, language)
-
     if (onMount) {
       onMount(editor, monaco)
     }

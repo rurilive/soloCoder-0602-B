@@ -87,7 +87,13 @@ export function createYjsConnection(roomId, userId, userName) {
       data.awareness_list.forEach(awarenessData => {
         if (awarenessData) {
           try {
-            awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(awarenessData), socket)
+            const update = new Uint8Array(awarenessData)
+            const decoder = createDecoder(update)
+            const messageType = readVarUint(decoder)
+            if (messageType === messageAwareness) {
+              const awarenessUpdate = readVarUint8Array(decoder)
+              awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, socket)
+            }
           } catch (e) {
             // ignore invalid awareness data
           }
