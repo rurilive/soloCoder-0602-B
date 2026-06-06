@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import { projectAPI, taskAPI, customFieldAPI, generateRequestId } from '../api';
+import { projectAPI, taskAPI, customFieldAPI } from '../api';
 import { wsManager } from '../websocketManager';
 import TaskCard from './TaskCard';
 import Modal from './Modal';
@@ -158,7 +158,6 @@ export default function KanbanBoard() {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
     try {
-      const requestId = generateRequestId();
       const data = {
         title: newTaskTitle,
         status: newTaskStatus,
@@ -170,9 +169,7 @@ export default function KanbanBoard() {
       if (Object.keys(newTaskCustomFields).length > 0) {
         data.custom_field_values = newTaskCustomFields;
       }
-      await taskAPI.create(projectId, data, {
-        headers: { 'X-Request-ID': requestId }
-      });
+      await taskAPI.create(projectId, data);
       setNewTaskTitle('');
       setNewTaskDueDate('');
       setNewTaskPriority('medium');
@@ -283,10 +280,7 @@ export default function KanbanBoard() {
   const handleDeleteTask = async (taskId) => {
     if (!window.confirm('确定删除此任务？')) return;
     try {
-      const requestId = generateRequestId();
-      await taskAPI.delete(projectId, taskId, {
-        headers: { 'X-Request-ID': requestId }
-      });
+      await taskAPI.delete(projectId, taskId);
       fetchTasks();
       showToast('任务删除成功', 'success');
     } catch {
@@ -308,7 +302,6 @@ export default function KanbanBoard() {
     e.preventDefault();
     if (!editTask || !editTask.title.trim()) return;
     try {
-      const requestId = generateRequestId();
       const data = {
         title: editTask.title,
         description: editTask.description,
@@ -321,9 +314,7 @@ export default function KanbanBoard() {
       if (editTask.custom_field_values) {
         data.custom_field_values = editTask.custom_field_values;
       }
-      await taskAPI.update(projectId, editTask.id, data, {
-        headers: { 'X-Request-ID': requestId }
-      });
+      await taskAPI.update(projectId, editTask.id, data);
       setEditModalOpen(false);
       setEditTask(null);
       fetchTasks();
@@ -374,10 +365,7 @@ export default function KanbanBoard() {
     setTasks(newTasks);
 
     try {
-      const requestId = generateRequestId();
-      await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition }, {
-        headers: { 'X-Request-ID': requestId }
-      });
+      await taskAPI.reorder(projectId, taskId, { task_id: taskId, new_status: newStatus, new_position: newPosition });
     } catch {
       setTasks(oldTasks);
       showToast('移动任务失败', 'error');
@@ -407,12 +395,9 @@ export default function KanbanBoard() {
   const handleBulkMove = async () => {
     if (selectedTasks.size === 0) return;
     try {
-      const requestId = generateRequestId();
       await taskAPI.bulkMove(projectId, {
         task_ids: Array.from(selectedTasks),
         new_status: bulkMoveStatus,
-      }, {
-        headers: { 'X-Request-ID': requestId }
       });
       setSelectedTasks(new Set());
       setSelectMode(false);
@@ -428,11 +413,8 @@ export default function KanbanBoard() {
     if (selectedTasks.size === 0) return;
     if (!window.confirm(`确定删除选中的 ${selectedTasks.size} 个任务？`)) return;
     try {
-      const requestId = generateRequestId();
       await taskAPI.bulkDelete(projectId, {
         task_ids: Array.from(selectedTasks),
-      }, {
-        headers: { 'X-Request-ID': requestId }
       });
       setSelectedTasks(new Set());
       setSelectMode(false);
