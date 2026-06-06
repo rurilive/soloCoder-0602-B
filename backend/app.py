@@ -15,20 +15,31 @@ class Room:
     def __init__(self, room_id):
         self.room_id = room_id
         self.users = {}
-        self.yjs_update_buffer = bytearray()
+        self.awareness_states = {}
 
     def add_user(self, user_id, user_name, sid):
         self.users[sid] = {'user_id': user_id, 'user_name': user_name}
 
     def remove_user(self, sid):
         if sid in self.users:
+            user_id = self.users[sid]['user_id']
             del self.users[sid]
+            if user_id in self.awareness_states:
+                del self.awareness_states[user_id]
+            return user_id
+        return None
 
     def get_users(self):
         return list(self.users.values())
 
     def has_users(self):
         return len(self.users) > 0
+
+    def set_awareness(self, user_id, awareness):
+        self.awareness_states[user_id] = awareness
+
+    def get_all_awareness(self):
+        return list(self.awareness_states.values())
 
 
 def get_or_create_room(room_id):
@@ -64,8 +75,13 @@ def handle_disconnect():
     for room_id, room in list(rooms.items()):
         user_info = room.users.get(request.sid)
         if user_info:
-            room.remove_user(request.sid)
+            user_id = room.remove_user(request.sid)
             leave_room(room_id)
+            emit('awareness-update', {
+                'user_id': user_id,
+                'awareness': None,
+                'awareness_list': room.get_all_awareness()
+            }, room=room_id)
             emit('user-left', {
                 'user_id': user_info['user_id'],
                 'user_name': user_info['user_name'],
@@ -89,12 +105,13 @@ def handle_join_room(data):
     join_room(room_id)
     room.add_user(user_id, user_name, request.sid)
 
-    print(f"User {user_name} joined room {room_id}")
+    print(f"User {user_name} ({user_id}) joined room {room_id}")
 
     emit('room-joined', {
         'room_id': room_id,
         'user_id': user_id,
-        'users': room.get_users()
+        'users': room.get_users(),
+        'awareness_list': room.get_all_awareness()
     })
 
     emit('user-joined', {
@@ -102,9 +119,6 @@ def handle_join_room(data):
         'user_name': user_name,
         'users': room.get_users()
     }, room=room_id, include_self=False)
-
-    if len(room.yjs_update_buffer) > 0:
-        emit('yjs-sync-step1', bytes(room.yjs_update_buffer))
 
 
 @socketio.on('yjs-update')
@@ -120,8 +134,6 @@ def handle_yjs_update(data):
         return
 
     update_bytes = bytes(update)
-    room.yjs_update_buffer.extend(update_bytes)
-
     emit('yjs-update', {
         'update': list(update_bytes),
         'user_id': room.users.get(request.sid, {}).get('user_id')
@@ -133,7 +145,7 @@ def handle_yjs_sync_step1(data):
     room_id = data.get('room_id')
     update = data.get('update')
 
-    if not room_id:
+    if not room_id or not update:
         return
 
     room = rooms.get(room_id)
@@ -141,11 +153,13 @@ def handle_yjs_sync_step1(data):
         return
 
     update_bytes = bytes(update)
-    room.yjs_update_buffer.extend(update_bytes)
 
     for sid in room.users.keys():
         if sid != request.sid:
-            emit('yjs-sync-step1', list(update_bytes), to=sid)
+            emit('yjs-sync-step1', {
+                'update': list(update_bytes),
+                'from_sid': request.sid
+            }, to=sid)
 
 
 @socketio.on('yjs-sync-step2')
@@ -157,8 +171,42 @@ def handle_yjs_sync_step2(data):
     if not room_id or not update:
         return
 
-    if target_sid:
-        emit('yjs-sync-step2', list(bytes(update)), to=target_sid)
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    update_bytes = bytes(update)
+
+    if target_sid and target_sid in room.users:
+        emit('yjs-sync-step2', {
+            'update': list(update_bytes)
+        }, to=target_sid)
+
+
+@socketio.on('awareness-update')
+def handle_awareness_update(data):
+    room_id = data.get('room_id')
+    awareness = data.get('awareness')
+
+    if not room_id:
+        return
+
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    user_info = room.users.get(request.sid)
+    if not user_info:
+        return
+
+    user_id = user_info['user_id']
+    room.set_awareness(user_id, awareness)
+
+    emit('awareness-update', {
+        'user_id': user_id,
+        'awareness': awareness,
+        'awareness_list': room.get_all_awareness()
+    }, room=room_id, include_self=False)
 
 
 @socketio.on('leave-room')
@@ -173,8 +221,13 @@ def handle_leave_room(data):
 
     user_info = room.users.get(request.sid)
     if user_info:
-        room.remove_user(request.sid)
+        user_id = room.remove_user(request.sid)
         leave_room(room_id)
+        emit('awareness-update', {
+            'user_id': user_id,
+            'awareness': None,
+            'awareness_list': room.get_all_awareness()
+        }, room=room_id)
         emit('user-left', {
             'user_id': user_info['user_id'],
             'user_name': user_info['user_name'],

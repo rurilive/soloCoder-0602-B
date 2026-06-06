@@ -1,46 +1,12 @@
 import { useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { MonacoBinding } from 'y-monaco'
-import * as Y from 'yjs'
 
 export default function CodeEditor({ yjsConn, language, onMount }) {
   const editorRef = useRef(null)
   const monacoRef = useRef(null)
   const bindingRef = useRef(null)
-
-  useEffect(() => {
-    if (!yjsConn) return
-
-    return () => {
-      if (bindingRef.current) {
-        bindingRef.current.destroy()
-        bindingRef.current = null
-      }
-    }
-  }, [yjsConn])
-
-  function handleEditorDidMount(editor, monaco) {
-    editorRef.current = editor
-    monacoRef.current = monaco
-
-    if (yjsConn) {
-      const ytext = yjsConn.getText('code')
-      if (ytext.length === 0) {
-        ytext.insert(0, getDefaultTemplate(language))
-      }
-
-      bindingRef.current = new MonacoBinding(
-        ytext,
-        editor.getModel(),
-        new Set([editor]),
-        yjsConn.awareness
-      )
-    }
-
-    if (onMount) {
-      onMount(editor, monaco)
-    }
-  }
+  const modelRef = useRef(null)
 
   function getDefaultTemplate(lang) {
     const templates = {
@@ -52,6 +18,63 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
       json: '{\n  "message": "Welcome to Collaborative JSON Editor",\n  "start_editing": true,\n  "collaborate": "in real-time"\n}\n'
     }
     return templates[lang] || '// Start typing to collaborate!\n'
+  }
+
+  function setupBinding(editor, monaco, lang) {
+    if (bindingRef.current) {
+      bindingRef.current.destroy()
+      bindingRef.current = null
+    }
+    if (modelRef.current) {
+      modelRef.current.dispose()
+      modelRef.current = null
+    }
+
+    if (!yjsConn) return
+
+    const ytext = yjsConn.getText('code')
+    if (ytext.length === 0) {
+      ytext.insert(0, getDefaultTemplate(lang))
+    }
+
+    const model = monaco.editor.createModel(ytext.toString(), lang)
+    modelRef.current = model
+    editor.setModel(model)
+
+    bindingRef.current = new MonacoBinding(
+      ytext,
+      model,
+      new Set([editor]),
+      yjsConn.awareness
+    )
+  }
+
+  useEffect(() => {
+    if (!yjsConn || !editorRef.current || !monacoRef.current) return
+
+    setupBinding(editorRef.current, monacoRef.current, language)
+
+    return () => {
+      if (bindingRef.current) {
+        bindingRef.current.destroy()
+        bindingRef.current = null
+      }
+      if (modelRef.current) {
+        modelRef.current.dispose()
+        modelRef.current = null
+      }
+    }
+  }, [yjsConn, language])
+
+  function handleEditorDidMount(editor, monaco) {
+    editorRef.current = editor
+    monacoRef.current = monaco
+
+    setupBinding(editor, monaco, language)
+
+    if (onMount) {
+      onMount(editor, monaco)
+    }
   }
 
   return (

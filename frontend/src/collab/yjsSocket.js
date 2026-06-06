@@ -2,6 +2,11 @@ import * as Y from 'yjs'
 import { io } from 'socket.io-client'
 import * as awarenessProtocol from 'y-protocols/awareness.js'
 import * as syncProtocol from 'y-protocols/sync.js'
+import { createEncoder, toUint8Array, writeVarUint, writeVarUint8Array } from 'lib0/encoding'
+import { createDecoder, readVarUint, readVarUint8Array } from 'lib0/decoding'
+
+const messageSync = 0
+const messageAwareness = 1
 
 export function createYjsConnection(roomId, userId, userName) {
   const ydoc = new Y.Doc()
@@ -27,6 +32,36 @@ export function createYjsConnection(roomId, userId, userName) {
 
   let connected = false
 
+  function sendAwarenessUpdate() {
+    const encoder = createEncoder()
+    writeVarUint(encoder, messageAwareness)
+    writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(awareness, [ydoc.clientID]))
+    socket.emit('awareness-update', {
+      room_id: roomId,
+      awareness: Array.from(toUint8Array(encoder))
+    })
+  }
+
+  function readSyncMessage(buffer) {
+    const decoder = createDecoder(buffer)
+    const messageType = readVarUint(decoder)
+    switch (messageType) {
+      case messageSync: {
+        const encoder = createEncoder()
+        writeVarUint(encoder, messageSync)
+        syncProtocol.readSyncMessage(decoder, encoder, ydoc, socket)
+        return toUint8Array(encoder)
+      }
+      case messageAwareness: {
+        const update = readVarUint8Array(decoder)
+        awarenessProtocol.applyAwarenessUpdate(awareness, update, socket)
+        return null
+      }
+      default:
+        return null
+    }
+  }
+
   socket.on('connect', () => {
     connected = true
     socket.emit('join-room', {
@@ -41,7 +76,25 @@ export function createYjsConnection(roomId, userId, userName) {
   })
 
   socket.on('room-joined', (data) => {
-    syncProtocol.step1(ydoc, socket, { room_id: roomId })
+    const encoder = createEncoder()
+    writeVarUint(encoder, messageSync)
+    syncProtocol.writeSyncStep1(encoder, ydoc)
+    socket.emit('yjs-sync-step1', {
+      room_id: roomId,
+      update: Array.from(toUint8Array(encoder))
+    })
+    if (data.awareness_list) {
+      data.awareness_list.forEach(awarenessData => {
+        if (awarenessData) {
+          try {
+            awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(awarenessData), socket)
+          } catch (e) {
+            // ignore invalid awareness data
+          }
+        }
+      })
+    }
+    sendAwarenessUpdate()
   })
 
   ydoc.on('update', (update, origin) => {
@@ -54,30 +107,47 @@ export function createYjsConnection(roomId, userId, userName) {
   })
 
   socket.on('yjs-update', (data) => {
-    Y.applyUpdate(ydoc, new Uint8Array(data.update), socket)
+    const update = new Uint8Array(data.update)
+    Y.applyUpdate(ydoc, update, socket)
   })
 
   socket.on('yjs-sync-step1', (data) => {
-    const update = new Uint8Array(data)
-    syncProtocol.readSyncMessage(
-      Y.createDecoder(update),
-      Y.createEncoder(),
-      ydoc,
-      socket
-    )
+    const update = new Uint8Array(data.update)
+    const response = readSyncMessage(update)
+    if (response && response.length > 1) {
+      socket.emit('yjs-sync-step2', {
+        room_id: roomId,
+        update: Array.from(response),
+        target_sid: data.from_sid
+      })
+    }
   })
 
   socket.on('yjs-sync-step2', (data) => {
-    const update = new Uint8Array(data)
-    syncProtocol.readSyncMessage(
-      Y.createDecoder(update),
-      Y.createEncoder(),
-      ydoc,
-      socket
-    )
+    const update = new Uint8Array(data.update)
+    readSyncMessage(update)
+  })
+
+  socket.on('awareness-update', (data) => {
+    if (data.awareness) {
+      try {
+        const update = new Uint8Array(data.awareness)
+        const decoder = createDecoder(update)
+        const messageType = readVarUint(decoder)
+        if (messageType === messageAwareness) {
+          const awarenessUpdate = readVarUint8Array(decoder)
+          awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, socket)
+        }
+      } catch (e) {
+        // ignore invalid awareness data
+      }
+    }
   })
 
   awareness.on('update', () => {
+    if (connected) {
+      sendAwarenessUpdate()
+    }
     const states = Array.from(awareness.getStates().entries()).map(([clientId, state]) => ({
       clientId,
       ...state.user
@@ -98,6 +168,7 @@ export function createYjsConnection(roomId, userId, userName) {
     },
     getText: (name) => ydoc.getText(name),
     destroy: () => {
+      awareness.setLocalState(null)
       socket.emit('leave-room', { room_id: roomId })
       socket.disconnect()
       ydoc.destroy()
