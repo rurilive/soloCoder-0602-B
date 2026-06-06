@@ -24,8 +24,10 @@ class CompanyResponse(BaseModel):
     email: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True,
+        "exclude": {"token_version"}
+    }
 
 
 class Token(BaseModel):

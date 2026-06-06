@@ -195,7 +195,12 @@ export default function KanbanBoard() {
   };
 
   const handleEditTask = (task) => {
-    setEditTask({ ...task });
+    const formattedTask = { ...task };
+    if (formattedTask.due_date) {
+      const dateObj = new Date(formattedTask.due_date);
+      formattedTask.due_date = dateObj.toISOString().split('T')[0];
+    }
+    setEditTask(formattedTask);
     setEditModalOpen(true);
   };
 
@@ -347,6 +352,18 @@ export default function KanbanBoard() {
         <button className="btn btn-outline" onClick={() => navigate('/')}>← 返回</button>
         <h2>{project.name}</h2>
         <div className="kanban-header-actions">
+          <div className="priority-filter-wrapper">
+            <label>优先级筛选:</label>
+            <select
+              className="priority-filter-global"
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+            >
+              {PRIORITY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
           {selectMode ? (
             <>
               <button className="btn btn-outline" onClick={handleSelectAll}>
@@ -406,15 +423,6 @@ export default function KanbanBoard() {
                 <div className="column-header" style={{ borderTopColor: column.color }}>
                   <span className="column-title">{column.title}</span>
                   <div className="column-header-right">
-                    <select
-                      className="priority-filter"
-                      value={priorityFilter}
-                      onChange={(e) => setPriorityFilter(e.target.value)}
-                    >
-                      {PRIORITY_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
                     <span className="column-count">{columnTasks.length}</span>
                   </div>
                 </div>
@@ -506,7 +514,7 @@ export default function KanbanBoard() {
             <label>截止日期</label>
             <input
               type="date"
-              value={editTask?.due_date ? editTask.due_date.slice(0, 10) : ''}
+              value={editTask?.due_date || ''}
               onChange={(e) => setEditTask({ ...editTask, due_date: e.target.value })}
             />
           </div>

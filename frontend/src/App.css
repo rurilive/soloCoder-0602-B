@@ -729,3 +729,36 @@ body {
   background: #f0f4ff;
 }
 
+.priority-filter-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+}
+
+.priority-filter-wrapper label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.priority-filter-global {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.priority-filter-global:hover {
+  border-color: #4361ee;
+}
+
+.priority-filter-global:focus {
+  outline: none;
+  border-color: #4361ee;
+  box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.1);
+}
+
