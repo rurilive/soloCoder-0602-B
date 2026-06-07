@@ -89,7 +89,7 @@ import builtins
 import sys
 
 _unsafe_builtins = ['open', 'eval', 'exec', 'compile', 'input', 'exit', 'quit']
-_unsafe_modules = ['os', 'subprocess', 'shutil', 'ctypes', 'socket', 'ftplib', 'http', 'urllib', 'requests', 'multiprocessing', 'threading']
+_unsafe_modules = ['os', 'subprocess', 'shutil', 'ctypes', 'socket', 'ftplib', 'http', 'urllib', 'requests', 'multiprocessing', 'threading', 'builtins', 'importlib', 'pkgutil', 'code', 'codeop']
 
 _original_import = builtins.__import__
 
