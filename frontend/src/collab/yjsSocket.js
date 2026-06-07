@@ -231,12 +231,17 @@ export function createYjsConnection(roomId, userId, userName) {
       createdAt: Date.now()
     }
     filesMap.set(id, fileData)
-    const ytext = fileContents.set(id, new Y.Text())
-    if (isFirstUser) {
-      ytext.insert(0, getDefaultTemplate(language))
-    }
+    fileContents.set(id, new Y.Text())
     triggerFilesUpdate()
     return fileData
+  }
+
+  function setFileContent(fileId, content) {
+    const ytext = fileContents.get(fileId)
+    if (ytext) {
+      ytext.delete(0, ytext.length)
+      ytext.insert(0, content)
+    }
   }
 
   function renameFile(fileId, newName) {
@@ -298,6 +303,8 @@ export function createYjsConnection(roomId, userId, userName) {
     renameFile,
     deleteFile,
     getFileContent,
+    setFileContent,
+    getDefaultTemplate,
     onFilesChange: (callback) => {
       onFilesChange = callback
       if (syncCompleted) {

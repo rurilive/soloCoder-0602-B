@@ -57,11 +57,16 @@ function App() {
     conn.onReady(({ isFirstUser }) => {
       if (isFirstUser) {
         setTimeout(() => {
-          const defaultFile = conn.createFile('main.js')
-          if (defaultFile) {
-            setSelectedFileId(defaultFile.id)
-            setOpenTabs([defaultFile.id])
-            setActiveTabId(defaultFile.id)
+          const files = conn.getFiles()
+          if (files.length === 0) {
+            const defaultFile = conn.createFile('main.js')
+            if (defaultFile) {
+              const template = conn.getDefaultTemplate(defaultFile.language)
+              conn.setFileContent(defaultFile.id, template)
+              setSelectedFileId(defaultFile.id)
+              setOpenTabs([defaultFile.id])
+              setActiveTabId(defaultFile.id)
+            }
           }
         }, 100)
       }
@@ -128,6 +133,8 @@ function App() {
     if (yjsConn) {
       const file = yjsConn.createFile(filename)
       if (file) {
+        const template = yjsConn.getDefaultTemplate(file.language)
+        yjsConn.setFileContent(file.id, template)
         handleSelectFile(file.id)
       }
     }

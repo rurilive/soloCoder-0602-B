@@ -79,19 +79,58 @@ def run_code():
     if language != 'python':
         return jsonify({'error': f'Unsupported language: {language}'}), 400
 
+    temp_dir = None
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(code)
-            temp_file = f.name
+        temp_dir = tempfile.mkdtemp(prefix='code_runner_')
+        temp_file = os.path.join(temp_dir, 'script.py')
+
+        wrapper_code = '''
+import builtins
+
+_unsafe_builtins = ['open', 'eval', 'exec', 'compile', '__import__', 'input', 'exit', 'quit']
+_unsafe_modules = ['os', 'subprocess', 'shutil', 'sys', 'ctypes', 'socket', 'ftplib', 'http', 'urllib', 'requests', 'multiprocessing', 'threading']
+
+_original_import = builtins.__import__
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    base_name = name.split('.')[0]
+    if base_name in _unsafe_modules:
+        raise ImportError(f"Import of module '{name}' is not allowed for security reasons")
+    return _original_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = _safe_import
+
+for _name in _unsafe_builtins:
+    if hasattr(builtins, _name):
+        delattr(builtins, _name)
+
+del _name, _original_import
+'''
+
+        final_code = wrapper_code + '\n' + code
+
+        with open(temp_file, 'w') as f:
+            f.write(final_code)
+
+        restricted_env = os.environ.copy()
+        restricted_env['PYTHONPATH'] = ''
+        restricted_env['PYTHONHOME'] = ''
 
         result = subprocess.run(
-            ['python', temp_file],
+            ['python', '-S', temp_file],
+            cwd=temp_dir,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            env=restricted_env
         )
 
-        os.unlink(temp_file)
+        for root, dirs, files in os.walk(temp_dir, topdown=False):
+            for name in files:
+                os.remove(os.path.join(root, name))
+            for name in dirs:
+                os.rmdir(os.path.join(root, name))
+        os.rmdir(temp_dir)
 
         return jsonify({
             'stdout': result.stdout,
@@ -99,16 +138,32 @@ def run_code():
             'returncode': result.returncode
         })
     except subprocess.TimeoutExpired:
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                for root, dirs, files in os.walk(temp_dir, topdown=False):
+                    for name in files:
+                        os.remove(os.path.join(root, name))
+                    for name in dirs:
+                        os.rmdir(os.path.join(root, name))
+                os.rmdir(temp_dir)
+            except:
+                pass
         return jsonify({
             'stdout': '',
             'stderr': 'Execution timed out after 10 seconds',
             'returncode': -1
         })
     except Exception as e:
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                for root, dirs, files in os.walk(temp_dir, topdown=False):
+                    for name in files:
+                        os.remove(os.path.join(root, name))
+                    for name in dirs:
+                        os.rmdir(os.path.join(root, name))
+                os.rmdir(temp_dir)
+            except:
+                pass
         return jsonify({
             'stdout': '',
             'stderr': str(e),

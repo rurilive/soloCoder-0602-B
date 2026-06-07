@@ -92,10 +92,25 @@ export default function FileTree({ files, selectedFileId, onSelectFile, onCreate
             onChange={(e) => setNewFileName(e.target.value)}
             placeholder="文件名 (如: app.js)"
             style={styles.input}
-            onBlur={() => {
-              if (!newFileName.trim()) {
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                if (newFileName.trim()) {
+                  onCreateFile(newFileName.trim())
+                  setNewFileName('')
+                  setShowNewFileInput(false)
+                }
+              } else if (e.key === 'Escape') {
+                setNewFileName('')
                 setShowNewFileInput(false)
               }
+            }}
+            onBlur={() => {
+              if (newFileName.trim()) {
+                onCreateFile(newFileName.trim())
+                setNewFileName('')
+              }
+              setShowNewFileInput(false)
             }}
           />
         </form>
