@@ -15,11 +15,7 @@ export function createYjsConnection(roomId, userId, userName) {
     transports: ['websocket', 'polling']
   })
 
-  awareness.setLocalStateField('user', {
-    id: userId,
-    name: userName,
-    color: getRandomColor()
-  })
+  let destroyed = false
 
   function getRandomColor() {
     const colors = [
@@ -165,15 +161,33 @@ export function createYjsConnection(roomId, userId, userName) {
 
   let onUsersChange = null
 
+  function triggerUsersUpdate() {
+    const states = Array.from(awareness.getStates().entries()).map(([clientId, state]) => ({
+      clientId,
+      ...state.user
+    }))
+    if (onUsersChange) {
+      onUsersChange(states)
+    }
+  }
+
   return {
     ydoc,
     awareness,
     socket,
     onUsersChange: (callback) => {
       onUsersChange = callback
+      awareness.setLocalStateField('user', {
+        id: userId,
+        name: userName,
+        color: getRandomColor()
+      })
+      triggerUsersUpdate()
     },
     getText: (name) => ydoc.getText(name),
     destroy: () => {
+      if (destroyed) return
+      destroyed = true
       awareness.setLocalState(null)
       socket.emit('leave-room', { room_id: roomId })
       socket.disconnect()

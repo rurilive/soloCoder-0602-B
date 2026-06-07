@@ -52,14 +52,10 @@ function App() {
   }, [joined, roomId, userId, userName])
 
   function handleLeave() {
-    if (yjsConn) {
-      yjsConn.destroy()
-    }
     setJoined(false)
     setRoomId('')
     setUserId('')
     setUserName('')
-    setYjsConn(null)
     setUsers([])
   }
 
