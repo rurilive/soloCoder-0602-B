@@ -5,6 +5,7 @@ import CodeEditor from './components/CodeEditor'
 import UserList from './components/UserList'
 import FileTree from './components/FileTree'
 import Terminal from './components/Terminal'
+import VersionHistory from './components/VersionHistory'
 
 function App() {
   const [joined, setJoined] = useState(false)
@@ -21,6 +22,8 @@ function App() {
   const [terminalLogs, setTerminalLogs] = useState([])
   const [showTerminal, setShowTerminal] = useState(true)
   const [isRunning, setIsRunning] = useState(false)
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
+  const [rollbackNotification, setRollbackNotification] = useState(null)
   const editorRef = useRef(null)
   const iframeRef = useRef(null)
 
@@ -91,6 +94,11 @@ function App() {
       })
     })
 
+    conn.onRollback((version) => {
+      setRollbackNotification(`文档已回退到版本 ${version}`)
+      setTimeout(() => setRollbackNotification(null), 3000)
+    })
+
     return () => {
       conn.destroy()
       setYjsConn(null)
@@ -99,6 +107,7 @@ function App() {
       setActiveTabId(null)
       setSelectedFileId(null)
       setTerminalLogs([])
+      setRollbackNotification(null)
     }
   }, [joined, roomId, userId, userName])
 
@@ -338,6 +347,17 @@ function App() {
 
   return (
     <div style={styles.app}>
+      {rollbackNotification && (
+        <div style={styles.rollbackNotification}>
+          {rollbackNotification}
+        </div>
+      )}
+      {showVersionHistory && (
+        <VersionHistory
+          yjsConn={yjsConn}
+          onClose={() => setShowVersionHistory(false)}
+        />
+      )}
       <div style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
           <h2 style={styles.logo}>✨ CodeCollab</h2>
@@ -410,6 +430,13 @@ function App() {
           </div>
           <div style={styles.headerRight}>
             <button
+              onClick={() => setShowVersionHistory(true)}
+              style={styles.versionBtn}
+              title="版本历史"
+            >
+              📜 历史版本
+            </button>
+            <button
               onClick={runCode}
               disabled={isRunning || !activeTabId}
               style={{
@@ -473,7 +500,22 @@ const styles = {
     display: 'flex',
     width: '100%',
     height: '100%',
-    backgroundColor: '#1e1e1e'
+    backgroundColor: '#1e1e1e',
+    position: 'relative'
+  },
+  rollbackNotification: {
+    position: 'fixed',
+    top: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    backgroundColor: '#e74c3c',
+    color: '#fff',
+    padding: '12px 24px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: 500,
+    zIndex: 2000,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
   },
   sidebar: {
     width: '260px',
@@ -614,6 +656,18 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     paddingRight: '16px'
+  },
+  versionBtn: {
+    backgroundColor: '#3c3c3c',
+    color: '#ddd',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '6px 12px',
+    fontSize: '13px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px'
   },
   runBtn: {
     backgroundColor: '#4CAF50',

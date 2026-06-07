@@ -66,6 +66,7 @@ export function createYjsConnection(roomId, userId, userName) {
 
   socket.on('connect', () => {
     connected = true
+    startAutoSave()
     socket.emit('join-room', {
       room_id: roomId,
       user_id: userId,
@@ -79,6 +80,21 @@ export function createYjsConnection(roomId, userId, userName) {
 
   socket.on('room-joined', (data) => {
     isFirstUser = data.users && data.users.length === 1
+    
+    if (data.latest_state && data.latest_state.length > 0) {
+      try {
+        const stateUpdate = new Uint8Array(data.latest_state)
+        Y.applyUpdate(ydoc, stateUpdate, 'server')
+        isFirstUser = false
+      } catch (e) {
+        console.error('Error applying server state:', e)
+      }
+    }
+    
+    if (data.current_version !== undefined) {
+      currentVersion = data.current_version
+    }
+
     const encoder = createEncoder()
     writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, ydoc)
@@ -92,6 +108,15 @@ export function createYjsConnection(roomId, userId, userName) {
           syncCompleted = true
           if (onReady) {
             onReady({ isFirstUser: true })
+          }
+        }
+      }, 500)
+    } else {
+      setTimeout(() => {
+        if (!syncCompleted) {
+          syncCompleted = true
+          if (onReady) {
+            onReady({ isFirstUser: false })
           }
         }
       }, 500)
@@ -113,6 +138,13 @@ export function createYjsConnection(roomId, userId, userName) {
       })
     }
     sendAwarenessUpdate()
+  })
+
+  socket.on('version-rolled-back', (data) => {
+    currentVersion = data.version
+    if (onRollback) {
+      onRollback(data.version)
+    }
   })
 
   ydoc.on('update', (update, origin) => {
@@ -185,6 +217,71 @@ export function createYjsConnection(roomId, userId, userName) {
   let isFirstUser = false
   let syncCompleted = false
   let onFilesChange = null
+  let onRollback = null
+  let currentVersion = 0
+  let autoSaveTimer = null
+  const API_BASE = 'http://localhost:2221/api'
+
+  function startAutoSave() {
+    if (autoSaveTimer) return
+    autoSaveTimer = setInterval(() => {
+      if (connected) {
+        saveSnapshot()
+      }
+    }, 5000)
+  }
+
+  function stopAutoSave() {
+    if (autoSaveTimer) {
+      clearInterval(autoSaveTimer)
+      autoSaveTimer = null
+    }
+  }
+
+  function saveSnapshot() {
+    try {
+      const snapshot = Y.encodeStateAsUpdate(ydoc)
+      socket.emit('save-snapshot', {
+        room_id: roomId,
+        snapshot: Array.from(snapshot)
+      })
+    } catch (e) {
+      console.error('Error saving snapshot:', e)
+    }
+  }
+
+  socket.on('snapshot-saved', (data) => {
+    if (data.success && data.version !== undefined) {
+      currentVersion = data.version
+    }
+  })
+
+  async function fetchVersions() {
+    try {
+      const response = await fetch(`${API_BASE}/rooms/${roomId}/versions`)
+      const data = await response.json()
+      return data.versions || []
+    } catch (e) {
+      console.error('Error fetching versions:', e)
+      return []
+    }
+  }
+
+  async function rollbackToVersion(version) {
+    try {
+      const response = await fetch(`${API_BASE}/rooms/${roomId}/rollback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ version })
+      })
+      return await response.json()
+    } catch (e) {
+      console.error('Error rolling back:', e)
+      return { success: false, error: e.message }
+    }
+  }
 
   const filesMap = ydoc.getMap('files')
   const fileContents = ydoc.getMap('fileContents')
@@ -287,6 +384,7 @@ export function createYjsConnection(roomId, userId, userName) {
     ydoc,
     awareness,
     socket,
+    currentVersion: () => currentVersion,
     onUsersChange: (callback) => {
       onUsersChange = callback
       triggerUsersUpdate()
@@ -297,6 +395,9 @@ export function createYjsConnection(roomId, userId, userName) {
         callback({ isFirstUser })
       }
     },
+    onRollback: (callback) => {
+      onRollback = callback
+    },
     getText: (name) => ydoc.getText(name),
     getFiles,
     createFile,
@@ -305,6 +406,8 @@ export function createYjsConnection(roomId, userId, userName) {
     getFileContent,
     setFileContent,
     getDefaultTemplate,
+    fetchVersions,
+    rollbackToVersion,
     onFilesChange: (callback) => {
       onFilesChange = callback
       if (syncCompleted) {
@@ -314,6 +417,7 @@ export function createYjsConnection(roomId, userId, userName) {
     destroy: () => {
       if (destroyed) return
       destroyed = true
+      stopAutoSave()
       awareness.setLocalState(null)
       socket.emit('leave-room', { room_id: roomId })
       socket.disconnect()

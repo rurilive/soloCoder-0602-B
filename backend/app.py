@@ -2,6 +2,9 @@ import uuid
 import subprocess
 import tempfile
 import os
+import sqlite3
+import threading
+import time
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
@@ -11,7 +14,93 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 app.config['SECRET_KEY'] = 'yjs-collab-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'yjs_versions.db')
+
 rooms = {}
+auto_save_timers = {}
+
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db_schema():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            snapshot BLOB NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(room_id, version)
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_room_id ON versions(room_id)
+    ''')
+    conn.commit()
+    conn.close()
+
+
+init_db_schema()
+
+
+def get_latest_version(room_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT * FROM versions WHERE room_id = ? ORDER BY version DESC LIMIT 1',
+        (room_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def get_all_versions(room_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT id, version, created_at FROM versions WHERE room_id = ? ORDER BY version DESC',
+        (room_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_version_snapshot(room_id, version):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT snapshot FROM versions WHERE room_id = ? AND version = ?',
+        (room_id, version)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row['snapshot'] if row else None
+
+
+def save_snapshot_to_db(room_id, version, snapshot):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO versions (room_id, version, snapshot, created_at) VALUES (?, ?, ?, ?)',
+        (room_id, version, snapshot, int(time.time()))
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_next_version(room_id):
+    latest = get_latest_version(room_id)
+    if latest:
+        return latest['version'] + 1
+    return 1
 
 
 class Room:
@@ -19,6 +108,29 @@ class Room:
         self.room_id = room_id
         self.users = {}
         self.awareness_states = {}
+        self.current_version = 0
+        self.pending_snapshot = None
+        self._lock = threading.Lock()
+        latest = get_latest_version(self.room_id)
+        if latest:
+            self.current_version = latest['version']
+
+    def save_snapshot(self, snapshot_bytes):
+        with self._lock:
+            try:
+                next_ver = get_next_version(self.room_id)
+                save_snapshot_to_db(self.room_id, next_ver, snapshot_bytes)
+                self.current_version = next_ver
+                return True
+            except Exception as e:
+                print(f"Error saving snapshot for room {self.room_id}: {e}")
+                return False
+
+    def get_latest_snapshot(self):
+        latest = get_latest_version(self.room_id)
+        if latest:
+            return latest['snapshot']
+        return None
 
     def add_user(self, user_id, user_name, sid):
         self.users[sid] = {'user_id': user_id, 'user_name': user_name}
@@ -60,6 +172,43 @@ def list_rooms():
             'user_count': len(room.get_users())
         })
     return {'rooms': room_list}
+
+
+@app.route('/api/rooms/<room_id>/versions', methods=['GET'])
+def get_room_versions(room_id):
+    versions = get_all_versions(room_id)
+    return {'versions': versions}
+
+
+@app.route('/api/rooms/<room_id>/rollback', methods=['POST'])
+def rollback_room(room_id):
+    data = request.get_json()
+    if not data or 'version' not in data:
+        return jsonify({'error': 'version is required'}), 400
+    target_version = data['version']
+    snapshot = get_version_snapshot(room_id, target_version)
+    if snapshot is None:
+        return jsonify({'error': 'Version not found'}), 404
+    room = rooms.get(room_id)
+    if room:
+        room.current_version = target_version
+    socketio.emit('yjs-update', {
+        'update': list(bytes(snapshot)),
+        'user_id': 'system'
+    }, room=room_id)
+    socketio.emit('version-rolled-back', {
+        'version': target_version
+    }, room=room_id)
+    return {'success': True, 'version': target_version}
+
+
+@app.route('/api/rooms/<room_id>/state', methods=['GET'])
+def get_room_state(room_id):
+    get_or_create_room(room_id)
+    latest = get_latest_version(room_id)
+    if latest is None:
+        return {'state': None, 'version': 0}
+    return {'state': list(bytes(latest['snapshot'])), 'version': latest['version']}
 
 
 @app.route('/api/health', methods=['GET'])
@@ -231,11 +380,14 @@ def handle_join_room(data):
 
     print(f"User {user_name} ({user_id}) joined room {room_id}")
 
+    latest_snapshot = room.get_latest_snapshot()
     emit('room-joined', {
         'room_id': room_id,
         'user_id': user_id,
         'users': room.get_users(),
-        'awareness_list': room.get_all_awareness()
+        'awareness_list': room.get_all_awareness(),
+        'latest_state': list(bytes(latest_snapshot)) if latest_snapshot else None,
+        'current_version': room.current_version
     })
 
     emit('user-joined', {
@@ -262,6 +414,26 @@ def handle_yjs_update(data):
         'update': list(update_bytes),
         'user_id': room.users.get(request.sid, {}).get('user_id')
     }, room=room_id, include_self=False)
+
+
+@socketio.on('save-snapshot')
+def handle_save_snapshot(data):
+    room_id = data.get('room_id')
+    snapshot = data.get('snapshot')
+
+    if not room_id or not snapshot:
+        return
+
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    snapshot_bytes = bytes(snapshot)
+    success = room.save_snapshot(snapshot_bytes)
+    emit('snapshot-saved', {
+        'success': success,
+        'version': room.current_version
+    })
 
 
 @socketio.on('yjs-sync-step1')
