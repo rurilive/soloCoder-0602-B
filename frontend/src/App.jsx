@@ -133,8 +133,6 @@ function App() {
     if (yjsConn) {
       const file = yjsConn.createFile(filename)
       if (file) {
-        const template = yjsConn.getDefaultTemplate(file.language)
-        yjsConn.setFileContent(file.id, template)
         handleSelectFile(file.id)
       }
     }

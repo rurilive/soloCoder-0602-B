@@ -86,9 +86,10 @@ def run_code():
 
         wrapper_code = '''
 import builtins
+import sys
 
-_unsafe_builtins = ['open', 'eval', 'exec', 'compile', '__import__', 'input', 'exit', 'quit']
-_unsafe_modules = ['os', 'subprocess', 'shutil', 'sys', 'ctypes', 'socket', 'ftplib', 'http', 'urllib', 'requests', 'multiprocessing', 'threading']
+_unsafe_builtins = ['open', 'eval', 'exec', 'compile', 'input', 'exit', 'quit']
+_unsafe_modules = ['os', 'subprocess', 'shutil', 'ctypes', 'socket', 'ftplib', 'http', 'urllib', 'requests', 'multiprocessing', 'threading']
 
 _original_import = builtins.__import__
 
@@ -104,7 +105,7 @@ for _name in _unsafe_builtins:
     if hasattr(builtins, _name):
         delattr(builtins, _name)
 
-del _name, _original_import
+del _name
 '''
 
         final_code = wrapper_code + '\n' + code
@@ -115,9 +116,25 @@ del _name, _original_import
         restricted_env = os.environ.copy()
         restricted_env['PYTHONPATH'] = ''
         restricted_env['PYTHONHOME'] = ''
+        restricted_env['PATH'] = '/usr/bin:/bin'
+        restricted_env.pop('HOME', None)
+        restricted_env.pop('USER', None)
+        restricted_env.pop('LOGNAME', None)
+
+        cmd = [
+            'prlimit',
+            '--cpu=5',
+            '--as=134217728',
+            '--data=67108864',
+            '--stack=33554432',
+            '--fsize=1048576',
+            '--nofile=32',
+            '--nproc=0',
+            'python3', '-S', '-I', temp_file
+        ]
 
         result = subprocess.run(
-            ['python', '-S', temp_file],
+            cmd,
             cwd=temp_dir,
             capture_output=True,
             text=True,
