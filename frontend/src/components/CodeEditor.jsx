@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { MonacoBinding } from 'y-monaco'
 
-export default function CodeEditor({ yjsConn, language, onMount }) {
+export default function CodeEditor({ yjsConn, fileId, language, onMount }) {
   const editorRef = useRef(null)
   const monacoRef = useRef(null)
   const bindingRef = useRef(null)
@@ -10,19 +10,7 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
   const isMountedRef = useRef(false)
   const rafIdRef = useRef(null)
 
-  function getDefaultTemplate(lang) {
-    const templates = {
-      javascript: '// Welcome to Collaborative JavaScript Editor\n// Start typing to collaborate in real-time!\n\nfunction hello() {\n  console.log("Hello, World!");\n}\n\nhello();\n',
-      typescript: '// Welcome to Collaborative TypeScript Editor\n// Start typing to collaborate in real-time!\n\nfunction hello(): void {\n  console.log("Hello, World!");\n}\n\nhello();\n',
-      python: '# Welcome to Collaborative Python Editor\n# Start typing to collaborate in real-time!\n\ndef hello():\n    print("Hello, World!")\n\nhello()\n',
-      html: '<!DOCTYPE html>\n<html>\n<head>\n  <title>Collab HTML</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n  <p>Start editing to collaborate in real-time!</p>\n</body>\n</html>\n',
-      css: '/* Welcome to Collaborative CSS Editor */\n/* Start typing to collaborate in real-time! */\n\nbody {\n  font-family: Arial, sans-serif;\n  margin: 0;\n  padding: 20px;\n  background-color: #f5f5f5;\n}\n\nh1 {\n  color: #333;\n}\n',
-      json: '{\n  "message": "Welcome to Collaborative JSON Editor",\n  "start_editing": true,\n  "collaborate": "in real-time"\n}\n'
-    }
-    return templates[lang] || '// Start typing to collaborate!\n'
-  }
-
-  function setupBinding(editor, monaco, lang) {
+  function setupBinding(editor, monaco, fileId, lang) {
     if (bindingRef.current) {
       bindingRef.current.destroy()
       bindingRef.current = null
@@ -32,9 +20,11 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
       modelRef.current = null
     }
 
-    if (!yjsConn) return
+    if (!yjsConn || !fileId) return
 
-    const ytext = yjsConn.getText('code')
+    const ytext = yjsConn.getFileContent(fileId)
+    if (!ytext) return
+
     const model = monaco.editor.createModel(ytext.toString(), lang)
     modelRef.current = model
     editor.setModel(model)
@@ -50,12 +40,17 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
   useEffect(() => {
     isMountedRef.current = true
 
-    if (!yjsConn || !editorRef.current || !monacoRef.current) return
-
-    setupBinding(editorRef.current, monacoRef.current, language)
-
     return () => {
       isMountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!yjsConn || !editorRef.current || !monacoRef.current || !fileId) return
+
+    setupBinding(editorRef.current, monacoRef.current, fileId, language)
+
+    return () => {
       if (rafIdRef.current) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
@@ -69,32 +64,28 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
         modelRef.current = null
       }
     }
-  }, [yjsConn, language])
-
-  useEffect(() => {
-    if (!yjsConn) return
-
-    yjsConn.onReady(({ isFirstUser }) => {
-      const ytext = yjsConn.getText('code')
-      if (ytext.length === 0 && isFirstUser) {
-        ytext.insert(0, getDefaultTemplate(language))
-      }
-    })
-  }, [yjsConn, language])
+  }, [yjsConn, fileId, language])
 
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
     monacoRef.current = monaco
 
     rafIdRef.current = requestAnimationFrame(() => {
-      if (isMountedRef.current && !bindingRef.current && yjsConn) {
-        setupBinding(editor, monaco, language)
+      if (isMountedRef.current && !bindingRef.current && yjsConn && fileId) {
+        setupBinding(editor, monaco, fileId, language)
       }
     })
 
     if (onMount) {
       onMount(editor, monaco)
     }
+  }
+
+  function getValue() {
+    if (editorRef.current) {
+      return editorRef.current.getValue()
+    }
+    return ''
   }
 
   return (

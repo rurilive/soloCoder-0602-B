@@ -1,5 +1,8 @@
 import uuid
-from flask import Flask, request
+import subprocess
+import tempfile
+import os
+from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 
@@ -62,6 +65,55 @@ def list_rooms():
 @app.route('/api/health', methods=['GET'])
 def health():
     return {'status': 'ok'}
+
+
+@app.route('/api/run', methods=['POST'])
+def run_code():
+    data = request.get_json()
+    if not data or 'code' not in data:
+        return jsonify({'error': 'No code provided'}), 400
+
+    code = data['code']
+    language = data.get('language', 'python')
+
+    if language != 'python':
+        return jsonify({'error': f'Unsupported language: {language}'}), 400
+
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_file = f.name
+
+        result = subprocess.run(
+            ['python', temp_file],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        os.unlink(temp_file)
+
+        return jsonify({
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'returncode': result.returncode
+        })
+    except subprocess.TimeoutExpired:
+        if os.path.exists(temp_file):
+            os.unlink(temp_file)
+        return jsonify({
+            'stdout': '',
+            'stderr': 'Execution timed out after 10 seconds',
+            'returncode': -1
+        })
+    except Exception as e:
+        if os.path.exists(temp_file):
+            os.unlink(temp_file)
+        return jsonify({
+            'stdout': '',
+            'stderr': str(e),
+            'returncode': -1
+        })
 
 
 @socketio.on('connect')

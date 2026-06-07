@@ -108,7 +108,6 @@ export function createYjsConnection(roomId, userId, userName) {
               awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, socket)
             }
           } catch (e) {
-            // ignore invalid awareness data
           }
         }
       })
@@ -164,7 +163,6 @@ export function createYjsConnection(roomId, userId, userName) {
           awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, socket)
         }
       } catch (e) {
-        // ignore invalid awareness data
       }
     }
   })
@@ -186,6 +184,89 @@ export function createYjsConnection(roomId, userId, userName) {
   let onReady = null
   let isFirstUser = false
   let syncCompleted = false
+  let onFilesChange = null
+
+  const filesMap = ydoc.getMap('files')
+  const fileContents = ydoc.getMap('fileContents')
+
+  function getFileLanguage(filename) {
+    const ext = filename.split('.').pop().toLowerCase()
+    const extMap = {
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'py': 'python',
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'json': 'json'
+    }
+    return extMap[ext] || 'javascript'
+  }
+
+  function getDefaultTemplate(lang) {
+    const templates = {
+      javascript: '// Welcome to Collaborative JavaScript Editor\n// Start typing to collaborate in real-time!\n\nfunction hello() {\n  console.log("Hello, World!");\n}\n\nhello();\n',
+      typescript: '// Welcome to Collaborative TypeScript Editor\n// Start typing to collaborate in real-time!\n\nfunction hello(): void {\n  console.log("Hello, World!");\n}\n\nhello();\n',
+      python: '# Welcome to Collaborative Python Editor\n# Start typing to collaborate in real-time!\n\ndef hello():\n    print("Hello, World!")\n\nhello()\n',
+      html: '<!DOCTYPE html>\n<html>\n<head>\n  <title>Collab HTML</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n  <p>Start editing to collaborate in real-time!</p>\n</body>\n</html>\n',
+      css: '/* Welcome to Collaborative CSS Editor */\n/* Start typing to collaborate in real-time! */\n\nbody {\n  font-family: Arial, sans-serif;\n  margin: 0;\n  padding: 20px;\n  background-color: #f5f5f5;\n}\n\nh1 {\n  color: #333;\n}\n',
+      json: '{\n  "message": "Welcome to Collaborative JSON Editor",\n  "start_editing": true,\n  "collaborate": "in real-time"\n}\n'
+    }
+    return templates[lang] || '// Start typing to collaborate!\n'
+  }
+
+  function getFiles() {
+    return Array.from(filesMap.values())
+  }
+
+  function createFile(filename) {
+    const id = 'file_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8)
+    const language = getFileLanguage(filename)
+    const fileData = {
+      id,
+      name: filename,
+      language,
+      createdAt: Date.now()
+    }
+    filesMap.set(id, fileData)
+    const ytext = fileContents.set(id, new Y.Text())
+    if (isFirstUser) {
+      ytext.insert(0, getDefaultTemplate(language))
+    }
+    triggerFilesUpdate()
+    return fileData
+  }
+
+  function renameFile(fileId, newName) {
+    const file = filesMap.get(fileId)
+    if (file) {
+      const language = getFileLanguage(newName)
+      filesMap.set(fileId, { ...file, name: newName, language })
+      triggerFilesUpdate()
+    }
+  }
+
+  function deleteFile(fileId) {
+    filesMap.delete(fileId)
+    fileContents.delete(fileId)
+    triggerFilesUpdate()
+  }
+
+  function getFileContent(fileId) {
+    return fileContents.get(fileId)
+  }
+
+  function triggerFilesUpdate() {
+    if (onFilesChange) {
+      onFilesChange(getFiles())
+    }
+  }
+
+  filesMap.observe(() => {
+    triggerFilesUpdate()
+  })
 
   function triggerUsersUpdate() {
     const states = Array.from(awareness.getStates().entries()).map(([clientId, state]) => ({
@@ -212,6 +293,17 @@ export function createYjsConnection(roomId, userId, userName) {
       }
     },
     getText: (name) => ydoc.getText(name),
+    getFiles,
+    createFile,
+    renameFile,
+    deleteFile,
+    getFileContent,
+    onFilesChange: (callback) => {
+      onFilesChange = callback
+      if (syncCompleted) {
+        callback(getFiles())
+      }
+    },
     destroy: () => {
       if (destroyed) return
       destroyed = true
