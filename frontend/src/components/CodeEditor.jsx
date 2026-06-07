@@ -35,10 +35,6 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
     if (!yjsConn) return
 
     const ytext = yjsConn.getText('code')
-    if (ytext.length === 0) {
-      ytext.insert(0, getDefaultTemplate(lang))
-    }
-
     const model = monaco.editor.createModel(ytext.toString(), lang)
     modelRef.current = model
     editor.setModel(model)
@@ -73,6 +69,17 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
         modelRef.current = null
       }
     }
+  }, [yjsConn, language])
+
+  useEffect(() => {
+    if (!yjsConn) return
+
+    yjsConn.onReady(({ isFirstUser }) => {
+      const ytext = yjsConn.getText('code')
+      if (ytext.length === 0 && isFirstUser) {
+        ytext.insert(0, getDefaultTemplate(language))
+      }
+    })
   }, [yjsConn, language])
 
   function handleEditorDidMount(editor, monaco) {

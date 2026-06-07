@@ -78,6 +78,7 @@ export function createYjsConnection(roomId, userId, userName) {
   })
 
   socket.on('room-joined', (data) => {
+    isFirstUser = data.users && data.users.length === 1
     const encoder = createEncoder()
     writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, ydoc)
@@ -85,6 +86,16 @@ export function createYjsConnection(roomId, userId, userName) {
       room_id: roomId,
       update: Array.from(toUint8Array(encoder))
     })
+    if (isFirstUser) {
+      setTimeout(() => {
+        if (!syncCompleted) {
+          syncCompleted = true
+          if (onReady) {
+            onReady({ isFirstUser: true })
+          }
+        }
+      }, 500)
+    }
     if (data.awareness_list) {
       data.awareness_list.forEach(awarenessData => {
         if (awarenessData) {
@@ -134,6 +145,12 @@ export function createYjsConnection(roomId, userId, userName) {
   socket.on('yjs-sync-step2', (data) => {
     const update = new Uint8Array(data.update)
     readSyncMessage(update)
+    if (!syncCompleted) {
+      syncCompleted = true
+      if (onReady) {
+        onReady({ isFirstUser })
+      }
+    }
   })
 
   socket.on('awareness-update', (data) => {
@@ -166,6 +183,9 @@ export function createYjsConnection(roomId, userId, userName) {
   })
 
   let onUsersChange = null
+  let onReady = null
+  let isFirstUser = false
+  let syncCompleted = false
 
   function triggerUsersUpdate() {
     const states = Array.from(awareness.getStates().entries()).map(([clientId, state]) => ({
@@ -184,6 +204,12 @@ export function createYjsConnection(roomId, userId, userName) {
     onUsersChange: (callback) => {
       onUsersChange = callback
       triggerUsersUpdate()
+    },
+    onReady: (callback) => {
+      onReady = callback
+      if (syncCompleted) {
+        callback({ isFirstUser })
+      }
     },
     getText: (name) => ydoc.getText(name),
     destroy: () => {
