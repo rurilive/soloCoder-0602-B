@@ -40,6 +40,15 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
+if command -v lsof &> /dev/null; then
+    OLD_PID=$(lsof -ti:2222 || true)
+    if [ -n "$OLD_PID" ]; then
+        echo "Killing old process on port 2222 (PID: $OLD_PID)..."
+        kill -9 $OLD_PID 2>/dev/null || true
+        sleep 1
+    fi
+fi
+
 npm run dev &
 FRONTEND_PID=$!
 

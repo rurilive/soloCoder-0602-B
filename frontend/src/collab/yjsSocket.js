@@ -17,6 +17,12 @@ export function createYjsConnection(roomId, userId, userName) {
 
   let destroyed = false
 
+  awareness.setLocalStateField('user', {
+    id: userId,
+    name: userName,
+    color: getRandomColor()
+  })
+
   function getRandomColor() {
     const colors = [
       '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4',
@@ -177,11 +183,6 @@ export function createYjsConnection(roomId, userId, userName) {
     socket,
     onUsersChange: (callback) => {
       onUsersChange = callback
-      awareness.setLocalStateField('user', {
-        id: userId,
-        name: userName,
-        color: getRandomColor()
-      })
       triggerUsersUpdate()
     },
     getText: (name) => ydoc.getText(name),
