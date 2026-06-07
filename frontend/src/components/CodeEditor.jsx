@@ -7,6 +7,8 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
   const monacoRef = useRef(null)
   const bindingRef = useRef(null)
   const modelRef = useRef(null)
+  const isMountedRef = useRef(false)
+  const rafIdRef = useRef(null)
 
   function getDefaultTemplate(lang) {
     const templates = {
@@ -50,11 +52,18 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
   }
 
   useEffect(() => {
+    isMountedRef.current = true
+
     if (!yjsConn || !editorRef.current || !monacoRef.current) return
 
     setupBinding(editorRef.current, monacoRef.current, language)
 
     return () => {
+      isMountedRef.current = false
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
       if (bindingRef.current) {
         bindingRef.current.destroy()
         bindingRef.current = null
@@ -69,6 +78,12 @@ export default function CodeEditor({ yjsConn, language, onMount }) {
   function handleEditorDidMount(editor, monaco) {
     editorRef.current = editor
     monacoRef.current = monaco
+
+    rafIdRef.current = requestAnimationFrame(() => {
+      if (isMountedRef.current && !bindingRef.current && yjsConn) {
+        setupBinding(editor, monaco, language)
+      }
+    })
 
     if (onMount) {
       onMount(editor, monaco)

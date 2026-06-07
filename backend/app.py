@@ -240,4 +240,4 @@ def handle_leave_room(data):
 
 if __name__ == '__main__':
     print("Starting collaborative code editor backend on port 2221...")
-    socketio.run(app, host='0.0.0.0', port=2221, debug=False, use_reloader=False)
+    socketio.run(app, host='0.0.0.0', port=2221, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
