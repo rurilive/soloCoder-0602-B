@@ -137,13 +137,14 @@ class Room:
     def _load_from_db(self):
         if not HAS_PYCRDT:
             return
-        latest = get_latest_version_row(self.room_id)
-        if latest:
-            self.current_version = latest['version']
-            restored = restore_doc_from_versions(self.room_id)
-            if restored:
-                self.ydoc = restored
-                self._last_saved_state = bytes(latest['state_vector'])
+        with self._lock:
+            latest = get_latest_version_row(self.room_id)
+            if latest:
+                self.current_version = latest['version']
+                restored = restore_doc_from_versions(self.room_id)
+                if restored:
+                    self.ydoc = restored
+                    self._last_saved_state = bytes(latest['state_vector'])
 
     def apply_update(self, update_bytes):
         if not HAS_PYCRDT:
@@ -195,11 +196,38 @@ class Room:
                 target_doc = restore_doc_from_versions(self.room_id, target_version)
                 if not target_doc:
                     return None
-                full_state_update = target_doc.get_update()
-                self.ydoc = target_doc
+                sv_before = self.ydoc.get_state()
+                target_contents = target_doc.get('fileContents')
+                current_contents = self.ydoc.get('fileContents')
+                with self.ydoc.new_transaction() as txn:
+                    if target_contents and current_contents:
+                        target_keys = set(target_contents.keys())
+                        current_keys = set(current_contents.keys())
+                        for key in current_keys - target_keys:
+                            del current_contents[key]
+                        for key in target_keys:
+                            target_text_obj = target_contents[key]
+                            target_text = str(target_text_obj)
+                            if key in current_keys:
+                                current_text_obj = current_contents[key]
+                                current_text_obj.clear()
+                                current_text_obj.insert(0, target_text)
+                            else:
+                                new_text = Y.Text()
+                                new_text.insert(0, target_text)
+                                current_contents[key] = new_text
+                    target_files = target_doc.get('files')
+                    current_files = self.ydoc.get('files')
+                    if target_files and current_files:
+                        for key in list(current_files.keys()):
+                            if key not in target_files:
+                                del current_files[key]
+                        for key in target_files:
+                            current_files[key] = target_files[key]
+                rollback_update = self.ydoc.get_update(sv_before)
                 self.current_version = target_version
-                self._last_saved_state = target_doc.get_state()
-                return full_state_update
+                self._last_saved_state = self.ydoc.get_state()
+                return rollback_update
             except Exception as e:
                 print(f"Error rolling back room {self.room_id}: {e}")
                 return None
