@@ -201,22 +201,22 @@ class Room:
                 return None
 
     @staticmethod
-    def _apply_char_diff(text_obj, current_text, target_text, txn):
+    def _compute_diff_summary(current_text, target_text):
         if current_text == target_text:
-            return
-        integrated = text_obj.integrated
-        raw_txn = txn._txn
+            return 'no changes'
         sm = SequenceMatcher(None, current_text, target_text)
         ops = [(tag, i1, i2, j1, j2)
                for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != 'equal']
-        for tag, i1, i2, j1, j2 in reversed(ops):
+        summary_parts = []
+        for tag, i1, i2, j1, j2 in ops:
             if tag == 'replace':
-                integrated.remove_range(raw_txn, i1, i2 - i1)
-                text_obj.insert(i1, target_text[j1:j2])
+                summary_parts.append(
+                    f'replace({i1}:{i2} -> {j1}:{j2})')
             elif tag == 'delete':
-                integrated.remove_range(raw_txn, i1, i2 - i1)
+                summary_parts.append(f'delete({i1}:{i2})')
             elif tag == 'insert':
-                text_obj.insert(i1, target_text[j1:j2])
+                summary_parts.append(f'insert({j1}:{j2})')
+        return f'{len(ops)} ops: {", ".join(summary_parts)}'
 
     def rollback_to_version(self, target_version):
         if not HAS_PYCRDT:
@@ -241,8 +241,11 @@ class Room:
                             if key in current_keys:
                                 current_text_obj = current_contents[key]
                                 current_text = str(current_text_obj)
-                                self._apply_char_diff(
-                                    current_text_obj, current_text, target_text, txn)
+                                diff_summary = self._compute_diff_summary(
+                                    current_text, target_text)
+                                print(f"Rollback diff [{key}]: {diff_summary}")
+                                current_text_obj.clear()
+                                current_text_obj.insert(0, target_text)
                             else:
                                 new_text = Y.Text()
                                 new_text.insert(0, target_text)
@@ -256,9 +259,9 @@ class Room:
                         for key in target_files:
                             current_files[key] = target_files[key]
                 rollback_update = self.ydoc.get_update(sv_before)
-                delete_versions_after(self.room_id, target_version)
                 self.current_version = target_version
                 self._last_saved_state = self.ydoc.get_state()
+                delete_versions_after(self.room_id, target_version)
                 return rollback_update
             except Exception as e:
                 print(f"Error rolling back room {self.room_id}: {e}")
