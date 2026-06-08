@@ -66,7 +66,6 @@ export function createYjsConnection(roomId, userId, userName) {
 
   socket.on('connect', () => {
     connected = true
-    startAutoSave()
     socket.emit('join-room', {
       room_id: roomId,
       user_id: userId,
@@ -219,36 +218,7 @@ export function createYjsConnection(roomId, userId, userName) {
   let onFilesChange = null
   let onRollback = null
   let currentVersion = 0
-  let autoSaveTimer = null
   const API_BASE = 'http://localhost:2221/api'
-
-  function startAutoSave() {
-    if (autoSaveTimer) return
-    autoSaveTimer = setInterval(() => {
-      if (connected) {
-        saveSnapshot()
-      }
-    }, 5000)
-  }
-
-  function stopAutoSave() {
-    if (autoSaveTimer) {
-      clearInterval(autoSaveTimer)
-      autoSaveTimer = null
-    }
-  }
-
-  function saveSnapshot() {
-    try {
-      const snapshot = Y.encodeStateAsUpdate(ydoc)
-      socket.emit('save-snapshot', {
-        room_id: roomId,
-        snapshot: Array.from(snapshot)
-      })
-    } catch (e) {
-      console.error('Error saving snapshot:', e)
-    }
-  }
 
   socket.on('snapshot-saved', (data) => {
     if (data.success && data.version !== undefined) {
@@ -417,7 +387,6 @@ export function createYjsConnection(roomId, userId, userName) {
     destroy: () => {
       if (destroyed) return
       destroyed = true
-      stopAutoSave()
       awareness.setLocalState(null)
       socket.emit('leave-room', { room_id: roomId })
       socket.disconnect()

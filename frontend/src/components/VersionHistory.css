@@ -1,0 +1,141 @@
+.vh-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.vh-modal {
+  background-color: #252526;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vh-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vh-title {
+  margin: 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.vh-close-btn {
+  background-color: transparent;
+  border: none;
+  color: #888;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.vh-close-btn:hover {
+  color: #fff;
+}
+
+.vh-refresh-bar {
+  padding: 12px 20px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vh-refresh-btn {
+  background-color: #3c3c3c;
+  color: #ddd;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vh-refresh-btn:hover:not(:disabled) {
+  background-color: #4c4c4c;
+}
+
+.vh-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vh-current-version {
+  color: #888;
+  font-size: 12px;
+}
+
+.vh-version-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.vh-version-item {
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #333;
+}
+
+.vh-version-item:hover {
+  background-color: #2d2d2d;
+}
+
+.vh-version-info {
+  flex: 1;
+}
+
+.vh-version-number {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.vh-version-time {
+  color: #888;
+  font-size: 12px;
+}
+
+.vh-rollback-btn {
+  background-color: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vh-rollback-btn:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
+.vh-rollback-btn:disabled {
+  cursor: not-allowed;
+}
+
+.vh-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+}

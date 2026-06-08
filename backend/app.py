@@ -9,6 +9,13 @@ from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 
+try:
+    import pycrdt as Y
+    HAS_PYCRDT = True
+except ImportError:
+    Y = None
+    HAS_PYCRDT = False
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 app.config['SECRET_KEY'] = 'yjs-collab-secret-key'
@@ -34,7 +41,8 @@ def init_db_schema():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             room_id TEXT NOT NULL,
             version INTEGER NOT NULL,
-            snapshot BLOB NOT NULL,
+            state_vector BLOB NOT NULL,
+            incremental_update BLOB NOT NULL,
             created_at INTEGER NOT NULL,
             UNIQUE(room_id, version)
         )
@@ -49,7 +57,7 @@ def init_db_schema():
 init_db_schema()
 
 
-def get_latest_version(room_id):
+def get_latest_version_row(room_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -73,34 +81,46 @@ def get_all_versions(room_id):
     return [dict(row) for row in rows]
 
 
-def get_version_snapshot(room_id, version):
+def get_all_version_updates(room_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT snapshot FROM versions WHERE room_id = ? AND version = ?',
-        (room_id, version)
+        'SELECT version, state_vector, incremental_update FROM versions WHERE room_id = ? ORDER BY version ASC',
+        (room_id,)
     )
-    row = cursor.fetchone()
+    rows = cursor.fetchall()
     conn.close()
-    return row['snapshot'] if row else None
+    return [dict(row) for row in rows]
 
 
-def save_snapshot_to_db(room_id, version, snapshot):
+def save_incremental_to_db(room_id, version, state_vector, incremental_update):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'INSERT INTO versions (room_id, version, snapshot, created_at) VALUES (?, ?, ?, ?)',
-        (room_id, version, snapshot, int(time.time()))
+        'INSERT INTO versions (room_id, version, state_vector, incremental_update, created_at) VALUES (?, ?, ?, ?, ?)',
+        (room_id, version, state_vector, incremental_update, int(time.time()))
     )
     conn.commit()
     conn.close()
 
 
 def get_next_version(room_id):
-    latest = get_latest_version(room_id)
+    latest = get_latest_version_row(room_id)
     if latest:
         return latest['version'] + 1
     return 1
+
+
+def restore_doc_from_versions(room_id, target_version=None):
+    if not HAS_PYCRDT:
+        return None
+    doc = Y.Doc()
+    versions = get_all_version_updates(room_id)
+    for v in versions:
+        if target_version is not None and v['version'] > target_version:
+            break
+        doc.apply_update(bytes(v['incremental_update']))
+    return doc
 
 
 class Room:
@@ -109,28 +129,80 @@ class Room:
         self.users = {}
         self.awareness_states = {}
         self.current_version = 0
-        self.pending_snapshot = None
         self._lock = threading.Lock()
-        latest = get_latest_version(self.room_id)
+        self.ydoc = Y.Doc() if HAS_PYCRDT else None
+        self._last_saved_state = None
+        self._load_from_db()
+
+    def _load_from_db(self):
+        if not HAS_PYCRDT:
+            return
+        latest = get_latest_version_row(self.room_id)
         if latest:
             self.current_version = latest['version']
+            restored = restore_doc_from_versions(self.room_id)
+            if restored:
+                self.ydoc = restored
+                self._last_saved_state = bytes(latest['state_vector'])
 
-    def save_snapshot(self, snapshot_bytes):
+    def apply_update(self, update_bytes):
+        if not HAS_PYCRDT:
+            return
         with self._lock:
             try:
+                self.ydoc.apply_update(update_bytes)
+            except Exception as e:
+                print(f"Error applying update for room {self.room_id}: {e}")
+
+    def save_snapshot(self):
+        if not HAS_PYCRDT:
+            return False
+        with self._lock:
+            try:
+                current_state = self.ydoc.get_state()
+                if self._last_saved_state == current_state:
+                    return False
+                inc_update = self.ydoc.get_update(self._last_saved_state)
                 next_ver = get_next_version(self.room_id)
-                save_snapshot_to_db(self.room_id, next_ver, snapshot_bytes)
+                save_incremental_to_db(
+                    self.room_id,
+                    next_ver,
+                    current_state,
+                    inc_update
+                )
                 self.current_version = next_ver
+                self._last_saved_state = current_state
                 return True
             except Exception as e:
                 print(f"Error saving snapshot for room {self.room_id}: {e}")
                 return False
 
-    def get_latest_snapshot(self):
-        latest = get_latest_version(self.room_id)
-        if latest:
-            return latest['snapshot']
-        return None
+    def get_full_state_update(self):
+        if not HAS_PYCRDT:
+            return None
+        with self._lock:
+            try:
+                return self.ydoc.get_update()
+            except Exception as e:
+                print(f"Error getting state for room {self.room_id}: {e}")
+                return None
+
+    def rollback_to_version(self, target_version):
+        if not HAS_PYCRDT:
+            return None
+        with self._lock:
+            try:
+                target_doc = restore_doc_from_versions(self.room_id, target_version)
+                if not target_doc:
+                    return None
+                full_state_update = target_doc.get_update()
+                self.ydoc = target_doc
+                self.current_version = target_version
+                self._last_saved_state = target_doc.get_state()
+                return full_state_update
+            except Exception as e:
+                print(f"Error rolling back room {self.room_id}: {e}")
+                return None
 
     def add_user(self, user_id, user_name, sid):
         self.users[sid] = {'user_id': user_id, 'user_name': user_name}
@@ -160,7 +232,22 @@ class Room:
 def get_or_create_room(room_id):
     if room_id not in rooms:
         rooms[room_id] = Room(room_id)
+        start_auto_save(room_id)
     return rooms[room_id]
+
+
+def start_auto_save(room_id):
+    if room_id in auto_save_timers:
+        return
+    def auto_save_loop():
+        while room_id in rooms:
+            time.sleep(5)
+            room = rooms.get(room_id)
+            if room:
+                room.save_snapshot()
+    timer = threading.Thread(target=auto_save_loop, daemon=True)
+    timer.start()
+    auto_save_timers[room_id] = timer
 
 
 @app.route('/api/rooms', methods=['GET'])
@@ -186,14 +273,14 @@ def rollback_room(room_id):
     if not data or 'version' not in data:
         return jsonify({'error': 'version is required'}), 400
     target_version = data['version']
-    snapshot = get_version_snapshot(room_id, target_version)
-    if snapshot is None:
-        return jsonify({'error': 'Version not found'}), 404
     room = rooms.get(room_id)
-    if room:
-        room.current_version = target_version
+    if not room:
+        return jsonify({'error': 'Room not found'}), 404
+    rollback_update = room.rollback_to_version(target_version)
+    if rollback_update is None:
+        return jsonify({'error': 'Rollback failed'}), 500
     socketio.emit('yjs-update', {
-        'update': list(bytes(snapshot)),
+        'update': list(bytes(rollback_update)),
         'user_id': 'system'
     }, room=room_id)
     socketio.emit('version-rolled-back', {
@@ -204,11 +291,11 @@ def rollback_room(room_id):
 
 @app.route('/api/rooms/<room_id>/state', methods=['GET'])
 def get_room_state(room_id):
-    get_or_create_room(room_id)
-    latest = get_latest_version(room_id)
-    if latest is None:
-        return {'state': None, 'version': 0}
-    return {'state': list(bytes(latest['snapshot'])), 'version': latest['version']}
+    room = get_or_create_room(room_id)
+    state = room.get_full_state_update()
+    if state is None:
+        return {'state': None, 'version': room.current_version}
+    return {'state': list(bytes(state)), 'version': room.current_version}
 
 
 @app.route('/api/health', methods=['GET'])
@@ -380,13 +467,13 @@ def handle_join_room(data):
 
     print(f"User {user_name} ({user_id}) joined room {room_id}")
 
-    latest_snapshot = room.get_latest_snapshot()
+    latest_state = room.get_full_state_update()
     emit('room-joined', {
         'room_id': room_id,
         'user_id': user_id,
         'users': room.get_users(),
         'awareness_list': room.get_all_awareness(),
-        'latest_state': list(bytes(latest_snapshot)) if latest_snapshot else None,
+        'latest_state': list(bytes(latest_state)) if latest_state else None,
         'current_version': room.current_version
     })
 
@@ -410,30 +497,11 @@ def handle_yjs_update(data):
         return
 
     update_bytes = bytes(update)
+    room.apply_update(update_bytes)
     emit('yjs-update', {
         'update': list(update_bytes),
         'user_id': room.users.get(request.sid, {}).get('user_id')
     }, room=room_id, include_self=False)
-
-
-@socketio.on('save-snapshot')
-def handle_save_snapshot(data):
-    room_id = data.get('room_id')
-    snapshot = data.get('snapshot')
-
-    if not room_id or not snapshot:
-        return
-
-    room = rooms.get(room_id)
-    if not room:
-        return
-
-    snapshot_bytes = bytes(snapshot)
-    success = room.save_snapshot(snapshot_bytes)
-    emit('snapshot-saved', {
-        'success': success,
-        'version': room.current_version
-    })
 
 
 @socketio.on('yjs-sync-step1')
@@ -449,6 +517,7 @@ def handle_yjs_sync_step1(data):
         return
 
     update_bytes = bytes(update)
+    room.apply_update(update_bytes)
 
     for sid in room.users.keys():
         if sid != request.sid:
@@ -472,6 +541,7 @@ def handle_yjs_sync_step2(data):
         return
 
     update_bytes = bytes(update)
+    room.apply_update(update_bytes)
 
     if target_sid and target_sid in room.users:
         emit('yjs-sync-step2', {

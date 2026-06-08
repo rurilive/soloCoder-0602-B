@@ -24,6 +24,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [rollbackNotification, setRollbackNotification] = useState(null)
+  const [connKey, setConnKey] = useState(0)
   const editorRef = useRef(null)
   const iframeRef = useRef(null)
 
@@ -95,8 +96,11 @@ function App() {
     })
 
     conn.onRollback((version) => {
-      setRollbackNotification(`文档已回退到版本 ${version}`)
-      setTimeout(() => setRollbackNotification(null), 3000)
+      setRollbackNotification(`文档已回退到版本 ${version}，正在重新同步...`)
+      setTimeout(() => {
+        setRollbackNotification(null)
+        setConnKey(prev => prev + 1)
+      }, 800)
     })
 
     return () => {
@@ -109,7 +113,7 @@ function App() {
       setTerminalLogs([])
       setRollbackNotification(null)
     }
-  }, [joined, roomId, userId, userName])
+  }, [joined, roomId, userId, userName, connKey])
 
   function handleLeave() {
     setJoined(false)
