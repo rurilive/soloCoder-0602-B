@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import time
+from difflib import SequenceMatcher
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
@@ -111,6 +112,17 @@ def get_next_version(room_id):
     return 1
 
 
+def delete_versions_after(room_id, target_version):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'DELETE FROM versions WHERE room_id = ? AND version > ?',
+        (room_id, target_version)
+    )
+    conn.commit()
+    conn.close()
+
+
 def restore_doc_from_versions(room_id, target_version=None):
     if not HAS_PYCRDT:
         return None
@@ -188,6 +200,24 @@ class Room:
                 print(f"Error getting state for room {self.room_id}: {e}")
                 return None
 
+    @staticmethod
+    def _apply_char_diff(text_obj, current_text, target_text, txn):
+        if current_text == target_text:
+            return
+        integrated = text_obj.integrated
+        raw_txn = txn._txn
+        sm = SequenceMatcher(None, current_text, target_text)
+        ops = [(tag, i1, i2, j1, j2)
+               for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != 'equal']
+        for tag, i1, i2, j1, j2 in reversed(ops):
+            if tag == 'replace':
+                integrated.remove_range(raw_txn, i1, i2 - i1)
+                text_obj.insert(i1, target_text[j1:j2])
+            elif tag == 'delete':
+                integrated.remove_range(raw_txn, i1, i2 - i1)
+            elif tag == 'insert':
+                text_obj.insert(i1, target_text[j1:j2])
+
     def rollback_to_version(self, target_version):
         if not HAS_PYCRDT:
             return None
@@ -210,8 +240,9 @@ class Room:
                             target_text = str(target_text_obj)
                             if key in current_keys:
                                 current_text_obj = current_contents[key]
-                                current_text_obj.clear()
-                                current_text_obj.insert(0, target_text)
+                                current_text = str(current_text_obj)
+                                self._apply_char_diff(
+                                    current_text_obj, current_text, target_text, txn)
                             else:
                                 new_text = Y.Text()
                                 new_text.insert(0, target_text)
@@ -225,6 +256,7 @@ class Room:
                         for key in target_files:
                             current_files[key] = target_files[key]
                 rollback_update = self.ydoc.get_update(sv_before)
+                delete_versions_after(self.room_id, target_version)
                 self.current_version = target_version
                 self._last_saved_state = self.ydoc.get_state()
                 return rollback_update
