@@ -51,6 +51,22 @@ def init_db_schema():
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_room_id ON versions(room_id)
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_chat_room_id ON chat_messages(room_id)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_messages(created_at)
+    ''')
     conn.commit()
     conn.close()
 
