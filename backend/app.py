@@ -139,6 +139,46 @@ def delete_versions_after(room_id, target_version):
     conn.close()
 
 
+def save_chat_message(room_id, user_id, user_name, content):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    created_at = int(time.time())
+    cursor.execute(
+        'INSERT INTO chat_messages (room_id, user_id, user_name, content, created_at) VALUES (?, ?, ?, ?, ?)',
+        (room_id, user_id, user_name, content, created_at)
+    )
+    msg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        'id': msg_id,
+        'room_id': room_id,
+        'user_id': user_id,
+        'user_name': user_name,
+        'content': content,
+        'created_at': created_at
+    }
+
+
+def get_chat_history(room_id, limit=100, before_id=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if before_id:
+        cursor.execute(
+            'SELECT * FROM chat_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?',
+            (room_id, before_id, limit)
+        )
+    else:
+        cursor.execute(
+            'SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?',
+            (room_id, limit)
+        )
+    rows = cursor.fetchall()
+    conn.close()
+    messages = [dict(row) for row in rows]
+    return list(reversed(messages))
+
+
 def restore_doc_from_versions(room_id, target_version=None):
     if not HAS_PYCRDT:
         return None
@@ -375,6 +415,15 @@ def get_room_state(room_id):
     if state is None:
         return {'state': None, 'version': room.current_version}
     return {'state': list(bytes(state)), 'version': room.current_version}
+
+
+@app.route('/api/rooms/<room_id>/messages', methods=['GET'])
+def get_room_messages(room_id):
+    limit = request.args.get('limit', 100, type=int)
+    before_id = request.args.get('before_id', None, type=int)
+    limit = min(max(limit, 1), 200)
+    messages = get_chat_history(room_id, limit=limit, before_id=before_id)
+    return {'messages': messages}
 
 
 @app.route('/api/health', methods=['GET'])
@@ -681,6 +730,59 @@ def handle_leave_room(data):
 
         if not room.has_users():
             del rooms[room_id]
+
+
+@socketio.on('chat-message')
+def handle_chat_message(data):
+    room_id = data.get('room_id')
+    content = data.get('content', '').strip()
+
+    if not room_id or not content:
+        return
+
+    if len(content) > 2000:
+        emit('chat-error', {'message': '消息长度不能超过2000字符'})
+        return
+
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    user_info = room.users.get(request.sid)
+    if not user_info:
+        return
+
+    message = save_chat_message(
+        room_id,
+        user_info['user_id'],
+        user_info['user_name'],
+        content
+    )
+
+    emit('chat-message', message, room=room_id)
+
+
+@socketio.on('chat-typing')
+def handle_chat_typing(data):
+    room_id = data.get('room_id')
+    is_typing = data.get('is_typing', False)
+
+    if not room_id:
+        return
+
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    user_info = room.users.get(request.sid)
+    if not user_info:
+        return
+
+    emit('chat-typing', {
+        'user_id': user_info['user_id'],
+        'user_name': user_info['user_name'],
+        'is_typing': is_typing
+    }, room=room_id, include_self=False)
 
 
 if __name__ == '__main__':

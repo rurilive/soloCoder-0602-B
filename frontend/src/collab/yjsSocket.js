@@ -218,6 +218,8 @@ export function createYjsConnection(roomId, userId, userName) {
   let onFilesChange = null
   let onRollback = null
   let currentVersion = 0
+  let chatMessageListeners = new Set()
+  let chatTypingListeners = new Set()
   const API_BASE = 'http://localhost:2221/api'
 
   socket.on('snapshot-saved', (data) => {
@@ -252,6 +254,71 @@ export function createYjsConnection(roomId, userId, userName) {
       return { success: false, error: e.message }
     }
   }
+
+  async function fetchChatHistory(limit = 100, beforeId = null) {
+    try {
+      let url = `${API_BASE}/rooms/${roomId}/messages?limit=${limit}`
+      if (beforeId) {
+        url += `&before_id=${beforeId}`
+      }
+      const response = await fetch(url)
+      const data = await response.json()
+      return data.messages || []
+    } catch (e) {
+      console.error('Error fetching chat history:', e)
+      return []
+    }
+  }
+
+  function sendChatMessage(content) {
+    if (!connected || !content.trim()) return
+    socket.emit('chat-message', {
+      room_id: roomId,
+      content: content.trim()
+    })
+  }
+
+  function sendChatTyping(isTyping) {
+    if (!connected) return
+    socket.emit('chat-typing', {
+      room_id: roomId,
+      is_typing: isTyping
+    })
+  }
+
+  function onChatMessage(callback) {
+    chatMessageListeners.add(callback)
+    return () => chatMessageListeners.delete(callback)
+  }
+
+  function offChatMessage(callback) {
+    chatMessageListeners.delete(callback)
+  }
+
+  function onChatTyping(callback) {
+    chatTypingListeners.add(callback)
+    return () => chatTypingListeners.delete(callback)
+  }
+
+  function offChatTyping(callback) {
+    chatTypingListeners.delete(callback)
+  }
+
+  socket.on('chat-message', (message) => {
+    chatMessageListeners.forEach(cb => {
+      try { cb(message) } catch (e) { console.error(e) }
+    })
+  })
+
+  socket.on('chat-typing', (data) => {
+    chatTypingListeners.forEach(cb => {
+      try { cb(data) } catch (e) { console.error(e) }
+    })
+  })
+
+  socket.on('chat-error', (data) => {
+    console.warn('Chat error:', data?.message)
+  })
 
   const filesMap = ydoc.getMap('files')
   const fileContents = ydoc.getMap('fileContents')
@@ -384,6 +451,13 @@ export function createYjsConnection(roomId, userId, userName) {
         callback(getFiles())
       }
     },
+    fetchChatHistory,
+    sendChatMessage,
+    sendChatTyping,
+    onChatMessage,
+    offChatMessage,
+    onChatTyping,
+    offChatTyping,
     destroy: () => {
       if (destroyed) return
       destroyed = true
@@ -391,6 +465,8 @@ export function createYjsConnection(roomId, userId, userName) {
       socket.emit('leave-room', { room_id: roomId })
       socket.disconnect()
       ydoc.destroy()
+      chatMessageListeners.clear()
+      chatTypingListeners.clear()
     }
   }
 }

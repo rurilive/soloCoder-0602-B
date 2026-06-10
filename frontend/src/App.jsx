@@ -6,6 +6,7 @@ import UserList from './components/UserList'
 import FileTree from './components/FileTree'
 import Terminal from './components/Terminal'
 import VersionHistory from './components/VersionHistory'
+import ChatPanel from './components/ChatPanel'
 
 function App() {
   const [joined, setJoined] = useState(false)
@@ -383,6 +384,14 @@ function App() {
         </div>
 
         <UserList users={users} currentUserId={userId} />
+
+        {yjsConn && (
+          <ChatPanel
+            yjsConn={yjsConn}
+            currentUserId={userId}
+            users={users}
+          />
+        )}
 
         <div style={styles.roomInfo}>
           <div style={styles.roomInfoLabel}>房间 ID</div>
