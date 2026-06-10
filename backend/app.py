@@ -1,3 +1,5 @@
+import html
+
 import uuid
 import subprocess
 import tempfile
@@ -739,6 +741,8 @@ def handle_chat_message(data):
 
     if not room_id or not content:
         return
+
+    content = html.escape(content, quote=True)
 
     if len(content) > 2000:
         emit('chat-error', {'message': '消息长度不能超过2000字符'})

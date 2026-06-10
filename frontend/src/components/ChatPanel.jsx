@@ -267,18 +267,17 @@ export default function ChatPanel({ yjsConn, currentUserId, users }) {
                 flexDirection: isSelf ? 'row-reverse' : 'row',
                 marginTop: sameUser && !showDate ? '2px' : '10px'
               }}>
-                {!sameUser || showDate ? (
+                {!isSelf && (!sameUser || showDate) && (
                   <div
                     style={{
                       ...styles.avatar,
-                      backgroundColor: userColors[msg.user_id] || '#888',
-                      opacity: isSelf ? 0 : 1,
-                      visibility: isSelf ? 'hidden' : 'visible'
+                      backgroundColor: userColors[msg.user_id] || '#888'
                     }}
                   >
                     {msg.user_name ? msg.user_name.charAt(0).toUpperCase() : '?'}
                   </div>
-                ) : (
+                )}
+                {!isSelf && sameUser && !showDate && (
                   <div style={styles.avatarPlaceholder} />
                 )}
                 <div style={{
