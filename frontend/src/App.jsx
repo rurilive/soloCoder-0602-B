@@ -25,6 +25,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [rollbackNotification, setRollbackNotification] = useState(null)
+  const [isFormatting, setIsFormatting] = useState(false)
   const editorRef = useRef(null)
   const iframeRef = useRef(null)
 
@@ -320,6 +321,55 @@ function App() {
     setIsRunning(false)
   }
 
+  async function formatCode() {
+    const currentFile = getCurrentFile()
+    if (!currentFile) {
+      addLog('没有打开的文件', 'error')
+      return
+    }
+
+    const code = getCurrentCode()
+    if (!code.trim()) {
+      addLog('代码为空，无需格式化', 'warn')
+      return
+    }
+
+    setIsFormatting(true)
+    addLog(`正在格式化 ${currentFile.name}...`, 'info')
+
+    try {
+      const response = await fetch('http://localhost:2221/api/format', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          code,
+          language: currentFile.language,
+          filename: currentFile.name
+        })
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        addLog(`格式化失败: ${result.error || '未知错误'}`, 'error')
+        setIsFormatting(false)
+        return
+      }
+
+      if (result.formatted_code !== undefined) {
+        yjsConn.setFileContent(activeTabId, result.formatted_code)
+        addLog(`格式化完成 (使用 ${result.formatter})`, 'success')
+      } else {
+        addLog('格式化完成，代码已是最佳格式', 'success')
+      }
+    } catch (e) {
+      addLog(`格式化请求错误: ${e.message}`, 'error')
+    }
+    setIsFormatting(false)
+  }
+
   function handleEditorMount(editor, monaco) {
     editorRef.current = editor
   }
@@ -444,6 +494,17 @@ function App() {
               title="版本历史"
             >
               📜 历史版本
+            </button>
+            <button
+              onClick={formatCode}
+              disabled={isFormatting || isRunning || !activeTabId}
+              style={{
+                ...styles.formatBtn,
+                opacity: isFormatting || isRunning || !activeTabId ? 0.5 : 1
+              }}
+              title="格式化当前文件代码"
+            >
+              {isFormatting ? '⏳ 格式化中...' : '✨ 格式化'}
             </button>
             <button
               onClick={runCode}
@@ -673,6 +734,19 @@ const styles = {
     borderRadius: '4px',
     padding: '6px 12px',
     fontSize: '13px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  formatBtn: {
+    backgroundColor: '#2196F3',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '6px 14px',
+    fontSize: '13px',
+    fontWeight: 500,
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',

@@ -433,6 +433,126 @@ def health():
     return {'status': 'ok'}
 
 
+PRETTIER_SUPPORTED = {
+    'javascript': 'babel',
+    'typescript': 'typescript',
+    'jsx': 'babel',
+    'tsx': 'typescript',
+    'html': 'html',
+    'css': 'css',
+    'json': 'json'
+}
+
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+PRETTIER_PATH = os.path.join(BACKEND_DIR, 'node_modules', '.bin', 'prettier')
+
+
+@app.route('/api/format', methods=['POST'])
+def format_code():
+    data = request.get_json()
+    if not data or 'code' not in data or 'language' not in data:
+        return jsonify({'error': 'code and language are required'}), 400
+
+    code = data['code']
+    language = data.get('language', '').lower()
+    filename = data.get('filename', '')
+
+    print(f"正在格式化... (语言: {language}, 文件: {filename or '未命名'})")
+
+    temp_dir = None
+    temp_file = None
+    try:
+        if language == 'python' or filename.endswith('.py'):
+            import autopep8
+            formatted = autopep8.fix_code(code, options={'aggressive': 2})
+            print(f"格式化完成 (autopep8, {len(code)} -> {len(formatted)} 字符)")
+            return jsonify({
+                'success': True,
+                'formatted_code': formatted,
+                'formatter': 'autopep8'
+            })
+
+        parser = None
+        if language in PRETTIER_SUPPORTED:
+            parser = PRETTIER_SUPPORTED[language]
+        else:
+            ext = filename.split('.')[-1].lower() if filename else ''
+            ext_map = {
+                'js': 'babel', 'jsx': 'babel',
+                'ts': 'typescript', 'tsx': 'typescript',
+                'html': 'html', 'htm': 'html',
+                'css': 'css', 'json': 'json'
+            }
+            parser = ext_map.get(ext)
+
+        if not parser:
+            return jsonify({
+                'error': f'Unsupported language: {language or filename}'
+            }), 400
+
+        temp_dir = tempfile.mkdtemp(prefix='fmt_')
+        ext_map_rev = {
+            'babel': 'js', 'typescript': 'ts',
+            'html': 'html', 'css': 'css', 'json': 'json'
+        }
+        ext = ext_map_rev.get(parser, 'txt')
+        temp_file = os.path.join(temp_dir, f'temp.{ext}')
+
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        cmd = [
+            PRETTIER_PATH,
+            '--parser', parser,
+            '--print-width', '100',
+            '--tab-width', '2',
+            '--single-quote', 'false',
+            '--trailing-comma', 'es5',
+            '--semi', 'true',
+            '--arrow-parens', 'always',
+            temp_file
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=BACKEND_DIR
+        )
+
+        if result.returncode != 0:
+            err_msg = result.stderr.strip() or f'Prettier exited with code {result.returncode}'
+            print(f"格式化失败: {err_msg}")
+            return jsonify({'error': f'Format failed: {err_msg}'}), 400
+
+        formatted = result.stdout
+        print(f"格式化完成 (prettier/{parser}, {len(code)} -> {len(formatted)} 字符)")
+        return jsonify({
+            'success': True,
+            'formatted_code': formatted,
+            'formatter': f'prettier ({parser})'
+        })
+
+    except subprocess.TimeoutExpired:
+        print("格式化超时")
+        return jsonify({'error': 'Format timed out after 15 seconds'}), 500
+    except Exception as e:
+        print(f"格式化错误: {e}")
+        return jsonify({'error': f'Format error: {str(e)}'}), 500
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+
+
 @app.route('/api/run', methods=['POST'])
 def run_code():
     data = request.get_json()
