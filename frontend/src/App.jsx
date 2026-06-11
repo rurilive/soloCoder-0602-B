@@ -466,7 +466,7 @@ function App() {
           />
         )}
 
-        {joined && <SnippetLibrary editor={editorInstance} />}
+        {joined && activeTabId && <SnippetLibrary editor={editorInstance} />}
 
         <div style={styles.fileTreeContainer}>
           {yjsConn && (
