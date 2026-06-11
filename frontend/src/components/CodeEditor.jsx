@@ -48,6 +48,7 @@ export default function CodeEditor({ yjsConn, fileId, language, onMount, highlig
     const model = editor.getModel()
     const lineLength = model.getLineMaxColumn(lineNumber)
 
+    editor.focus()
     editor.revealLineInCenter(lineNumber)
 
     editor.setSelection({
@@ -61,34 +62,79 @@ export default function CodeEditor({ yjsConn, fileId, language, onMount, highlig
       {
         range: new monaco.Range(lineNumber, 1, lineNumber, lineLength),
         options: {
-          inlineClassName: 'search-highlight-inline',
+          backgroundColor: '#ffd70088',
+          color: '#000000',
           overviewRuler: {
-            color: '#ff6600',
-            position: monaco.editor.OverviewRulerLane.Full
-          }
-        }
-      },
-      {
-        range: new monaco.Range(lineNumber, 1, lineNumber, 1),
-        options: {
-          linesDecorationsClassName: 'search-highlight-line-gutter',
-          overviewRuler: {
-            color: '#ff6600',
+            color: '#ffd700',
             position: monaco.editor.OverviewRulerLane.Full
           }
         }
       }
     ])
 
+    highlightLineDomWithRetry(lineNumber, 0)
+
     setTimeout(() => {
       decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [])
+      clearLineHighlightDom()
       editor.setSelection({
         startLineNumber: lineNumber,
         startColumn: 1,
         endLineNumber: lineNumber,
         endColumn: 1
       })
-    }, 5000)
+    }, 3500)
+  }
+
+  function highlightLineDomWithRetry(lineNumber, attempt) {
+    if (attempt > 10) return
+    
+    const found = highlightLineDom(lineNumber)
+    if (!found) {
+      setTimeout(() => {
+        highlightLineDomWithRetry(lineNumber, attempt + 1)
+      }, 50)
+    }
+  }
+
+  function highlightLineDom(lineNumber) {
+    if (!editorRef.current || !monacoRef.current) return false
+    const editor = editorRef.current
+    const editorDom = editor.getDomNode()
+    if (!editorDom) return false
+
+    const viewLines = editorDom.querySelector('.view-lines')
+    if (!viewLines || viewLines.children.length === 0) return false
+
+    const topForLine = editor.getTopForLineNumber(lineNumber)
+    const lineElements = viewLines.querySelectorAll('.view-line')
+    
+    let closestEl = null
+    let closestDiff = Infinity
+    
+    lineElements.forEach(el => {
+      const top = parseInt(el.style.top) || 0
+      const diff = Math.abs(top - topForLine)
+      if (diff < closestDiff) {
+        closestDiff = diff
+        closestEl = el
+      }
+    })
+    
+    if (closestEl && closestDiff < 5) {
+      closestEl.classList.add('search-highlight-dom-line')
+      return true
+    }
+    return false
+  }
+
+  function clearLineHighlightDom() {
+    if (!editorRef.current) return
+    const editorDom = editorRef.current.getDomNode()
+    if (!editorDom) return
+
+    const highlighted = editorDom.querySelectorAll('.search-highlight-dom-line')
+    highlighted.forEach(el => el.classList.remove('search-highlight-dom-line'))
   }
 
   useEffect(() => {
@@ -99,17 +145,21 @@ export default function CodeEditor({ yjsConn, fileId, language, onMount, highlig
       const style = document.createElement('style')
       style.id = styleId
       style.textContent = `
-        .search-highlight-line {
-          background-color: #ff6600 !important;
+        .search-highlight-dom-line {
+          background: linear-gradient(90deg, #ffd700 0%, #ffed4a 50%, #ffd700 100%) !important;
+          box-shadow: inset 5px 0 0 0 #ff6b00 !important;
+          border-radius: 3px;
+          animation: search-highlight-pulse 1s ease-in-out infinite;
+        }
+        @keyframes search-highlight-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
         }
         .search-highlight-line-gutter {
-          background-color: #ff6600 !important;
-          border-left: 5px solid #ff3300 !important;
+          background-color: #ffd700 !important;
         }
         .search-highlight-inline {
-          background-color: #ff6600aa !important;
-          color: #ffffff !important;
-          font-weight: 600 !important;
+          background-color: #ffd70066 !important;
         }
       `
       document.head.appendChild(style)
