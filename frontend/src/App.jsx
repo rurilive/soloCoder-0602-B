@@ -7,6 +7,7 @@ import FileTree from './components/FileTree'
 import Terminal from './components/Terminal'
 import VersionHistory from './components/VersionHistory'
 import ChatPanel from './components/ChatPanel'
+import GlobalSearch from './components/GlobalSearch'
 
 function App() {
   const [joined, setJoined] = useState(false)
@@ -26,6 +27,8 @@ function App() {
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [rollbackNotification, setRollbackNotification] = useState(null)
   const [isFormatting, setIsFormatting] = useState(false)
+  const [searchHighlightLine, setSearchHighlightLine] = useState(null)
+  const [fileContentVersion, setFileContentVersion] = useState(0)
   const editorRef = useRef(null)
   const iframeRef = useRef(null)
 
@@ -101,7 +104,18 @@ function App() {
       setTimeout(() => setRollbackNotification(null), 3000)
     })
 
+    let contentUpdateTimeout = null
+    const handleDocUpdate = () => {
+      if (contentUpdateTimeout) clearTimeout(contentUpdateTimeout)
+      contentUpdateTimeout = setTimeout(() => {
+        setFileContentVersion(v => v + 1)
+      }, 150)
+    }
+    conn.ydoc.on('update', handleDocUpdate)
+
     return () => {
+      if (contentUpdateTimeout) clearTimeout(contentUpdateTimeout)
+      conn.ydoc.off('update', handleDocUpdate)
       conn.destroy()
       setYjsConn(null)
       setFiles([])
@@ -127,6 +141,15 @@ function App() {
       setOpenTabs([...openTabs, fileId])
     }
     setActiveTabId(fileId)
+  }
+
+  function handleJumpToLine(fileId, lineNumber) {
+    setSelectedFileId(fileId)
+    if (!openTabs.includes(fileId)) {
+      setOpenTabs([...openTabs, fileId])
+    }
+    setActiveTabId(fileId)
+    setSearchHighlightLine({ fileId, lineNumber, ts: Date.now() })
   }
 
   function handleCloseTab(fileId, e) {
@@ -431,6 +454,15 @@ function App() {
           </div>
         </div>
 
+        {yjsConn && (
+          <GlobalSearch
+            files={files}
+            yjsConn={yjsConn}
+            onJumpToLine={handleJumpToLine}
+            contentVersion={fileContentVersion}
+          />
+        )}
+
         <div style={styles.fileTreeContainer}>
           {yjsConn && (
             <FileTree
@@ -541,6 +573,7 @@ function App() {
                 fileId={activeTabId}
                 language={currentFile.language}
                 onMount={handleEditorMount}
+                highlightLine={searchHighlightLine}
               />
             )}
             {!activeTabId && (
@@ -604,7 +637,9 @@ const styles = {
     borderRight: '1px solid #333',
     display: 'flex',
     flexDirection: 'column',
-    flexShrink: 0
+    flexShrink: 0,
+    overflowY: 'auto',
+    minHeight: 0
   },
   sidebarHeader: {
     padding: '16px 12px',
