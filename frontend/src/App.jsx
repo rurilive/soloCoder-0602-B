@@ -8,6 +8,7 @@ import Terminal from './components/Terminal'
 import VersionHistory from './components/VersionHistory'
 import ChatPanel from './components/ChatPanel'
 import GlobalSearch from './components/GlobalSearch'
+import SnippetLibrary from './components/SnippetLibrary'
 
 function App() {
   const [joined, setJoined] = useState(false)
@@ -29,6 +30,7 @@ function App() {
   const [isFormatting, setIsFormatting] = useState(false)
   const [searchHighlightLine, setSearchHighlightLine] = useState(null)
   const [fileContentVersion, setFileContentVersion] = useState(0)
+  const [editorInstance, setEditorInstance] = useState(null)
   const editorRef = useRef(null)
   const iframeRef = useRef(null)
 
@@ -406,6 +408,7 @@ function App() {
 
   function handleEditorMount(editor, monaco) {
     editorRef.current = editor
+    setEditorInstance(editor)
   }
 
   function getFileIcon(filename) {
@@ -462,6 +465,8 @@ function App() {
             contentVersion={fileContentVersion}
           />
         )}
+
+        <SnippetLibrary editor={editorInstance} />
 
         <div style={styles.fileTreeContainer}>
           {yjsConn && (
