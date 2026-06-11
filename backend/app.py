@@ -462,7 +462,7 @@ def format_code():
     temp_dir = None
     temp_file = None
     try:
-        if language == 'python' or filename.endswith('.py'):
+        if language == 'python' or (filename and filename.endswith('.py')):
             import autopep8
             formatted = autopep8.fix_code(code, options={'aggressive': 2})
             print(f"格式化完成 (autopep8, {len(code)} -> {len(formatted)} 字符)")

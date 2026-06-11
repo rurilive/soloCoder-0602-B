@@ -350,7 +350,18 @@ function App() {
         })
       })
 
-      const result = await response.json()
+      let result
+      try {
+        result = await response.json()
+      } catch (parseErr) {
+        result = { error: `服务器返回了无效的响应 (HTTP ${response.status})` }
+      }
+
+      if (!response.ok) {
+        addLog(`格式化失败: ${result.error || `HTTP ${response.status} ${response.statusText}`}`, 'error')
+        setIsFormatting(false)
+        return
+      }
 
       if (!result.success) {
         addLog(`格式化失败: ${result.error || '未知错误'}`, 'error')
