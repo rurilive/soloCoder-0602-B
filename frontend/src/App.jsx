@@ -466,7 +466,7 @@ function App() {
           />
         )}
 
-        <SnippetLibrary editor={editorInstance} />
+        {joined && <SnippetLibrary editor={editorInstance} />}
 
         <div style={styles.fileTreeContainer}>
           {yjsConn && (
