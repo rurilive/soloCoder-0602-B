@@ -18,7 +18,7 @@ export default function Transactions({ currentLedger }) {
     setLoading(true);
     try {
       const [txs, cats] = await Promise.all([
-        transactionApi.list({ ledger_id: currentLedger.id, month: filterMonth.format('YYYY-MM') }),
+        transactionApi.list({ ledger_id: currentLedger.id, year: filterMonth.year(), month: filterMonth.month() + 1 }),
         categoryApi.list({ ledger_id: currentLedger.id }),
       ]);
       setData(txs);

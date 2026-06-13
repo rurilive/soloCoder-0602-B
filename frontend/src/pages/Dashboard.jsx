@@ -19,7 +19,7 @@ export default function Dashboard({ currentLedger }) {
       try {
         const [s, txs, cats] = await Promise.all([
           statisticsApi.monthly({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 }),
-          transactionApi.list({ ledger_id: currentLedger.id, month: now.format('YYYY-MM') }),
+          transactionApi.list({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 }),
           statisticsApi.categories({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1, type: 'expense' }),
         ]);
         setSummary(s);

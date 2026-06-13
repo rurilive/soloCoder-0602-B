@@ -24,7 +24,7 @@ export default function MonthlyReport({ currentLedger }) {
           statisticsApi.monthly({ ledger_id: currentLedger.id, year: y, month: m }),
           statisticsApi.categories({ ledger_id: currentLedger.id, year: y, month: m, type: 'expense' }),
           statisticsApi.categories({ ledger_id: currentLedger.id, year: y, month: m, type: 'income' }),
-          transactionApi.list({ ledger_id: currentLedger.id, month: month.format('YYYY-MM') }),
+          transactionApi.list({ ledger_id: currentLedger.id, year: y, month: m }),
         ]);
         setSummary(s);
         setExpenseStats(eCats);
