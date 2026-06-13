@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, SessionLocal, Base
-from app.models import Ledger, Category, Transaction
-from app.routers import ledgers, categories, transactions, statistics, recurring
+from app.models import Ledger, Category, Transaction, Budget
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets
 
 
 def seed_db():
@@ -82,6 +82,7 @@ app.include_router(categories.router)
 app.include_router(transactions.router)
 app.include_router(statistics.router)
 app.include_router(recurring.router)
+app.include_router(budgets.router)
 
 
 @app.get("/api/health")

@@ -148,6 +148,49 @@ class RecurringLogOut(BaseModel):
     created_at: datetime
 
 
+class BudgetCreate(BaseModel):
+    category_id: int
+    ledger_id: int
+    amount: float
+    year: int
+    month: int
+
+
+class BudgetUpdate(BaseModel):
+    amount: Optional[float] = None
+
+
+class BudgetOut(BaseModel):
+    id: int
+    category_id: int
+    ledger_id: int
+    amount: float
+    year: int
+    month: int
+    created_at: datetime
+
+
+class BudgetProgressItem(BaseModel):
+    category_id: int
+    category_name: str
+    category_icon: str
+    budget_amount: float
+    spent: float
+    remaining: float
+    remaining_ratio: float
+    is_overbudget: bool
+
+
+class BudgetProgressSummary(BaseModel):
+    year: int
+    month: int
+    total_budget: float
+    total_spent: float
+    total_remaining: float
+    overbudget_count: int
+    items: List[BudgetProgressItem]
+
+
 class GenerateResult(BaseModel):
     total_rules: int
     generated_count: int

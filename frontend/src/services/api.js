@@ -51,6 +51,21 @@ export const statisticsApi = {
   },
 };
 
+export const budgetApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/budgets/${qs ? '?' + qs : ''}`);
+  },
+  get: (id) => request(`/budgets/${id}`),
+  create: (data) => request('/budgets/', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/budgets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => request(`/budgets/${id}`, { method: 'DELETE' }),
+  progress: (params) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/budgets/progress?${qs}`);
+  },
+};
+
 export const recurringApi = {
   listRules: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();

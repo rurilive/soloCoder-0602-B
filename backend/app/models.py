@@ -38,6 +38,18 @@ class Transaction(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class Budget(Base):
+    __tablename__ = "budgets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class RecurringRule(Base):
     __tablename__ = "recurring_rules"
 
