@@ -271,7 +271,7 @@ export default function BudgetManagement({ currentLedger }) {
         {progress && progress.items.length > 0 ? (
           <>
             <Row gutter={16} style={{ marginBottom: 24 }}>
-              <Col span={6}>
+              <Col flex="1">
                 <Card size="small">
                   <Statistic
                     title="总预算"
@@ -282,10 +282,10 @@ export default function BudgetManagement({ currentLedger }) {
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col flex="1">
                 <Card size="small">
                   <Statistic
-                    title="预算内支出"
+                    title="已设预算分类支出"
                     value={progress.total_spent}
                     prefix={<DollarOutlined />}
                     precision={2}
@@ -293,7 +293,18 @@ export default function BudgetManagement({ currentLedger }) {
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col flex="1">
+                <Card size="small">
+                  <Statistic
+                    title="未设预算分类支出"
+                    value={progress.unbudgeted_spent || 0}
+                    prefix={<DollarOutlined />}
+                    precision={2}
+                    valueStyle={{ color: '#d48806' }}
+                  />
+                </Card>
+              </Col>
+              <Col flex="1">
                 <Card size="small">
                   <Statistic
                     title="剩余"
@@ -304,7 +315,7 @@ export default function BudgetManagement({ currentLedger }) {
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col flex="1">
                 <Card size="small">
                   <Statistic
                     title="超支分类"
@@ -316,18 +327,6 @@ export default function BudgetManagement({ currentLedger }) {
                 </Card>
               </Col>
             </Row>
-
-            {progress.unbudgeted_spent > 0 && (
-              <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', borderColor: '#ffe58f' }}>
-                <Statistic
-                  title="未设预算分类的支出"
-                  value={progress.unbudgeted_spent}
-                  prefix={<DollarOutlined />}
-                  precision={2}
-                  valueStyle={{ color: '#d48806', fontSize: 16 }}
-                />
-              </Card>
-            )}
 
             <Card title={`已设预算 (${budgetedItems.length})`} size="small">
               {budgetedItems.length > 0 ? (
