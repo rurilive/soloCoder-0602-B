@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class LedgerCreate(BaseModel):
@@ -89,3 +89,67 @@ class CategoryStat(BaseModel):
     type: str
     amount: float
     percentage: float
+
+
+class RecurringRuleCreate(BaseModel):
+    name: str
+    frequency: str
+    amount: float
+    type: str
+    description: str = ""
+    category_id: int
+    ledger_id: int
+    start_date: str
+    end_date: str = ""
+    day_of_month: Optional[int] = None
+    day_of_week: Optional[int] = None
+
+
+class RecurringRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    frequency: Optional[str] = None
+    amount: Optional[float] = None
+    type: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    next_date: Optional[str] = None
+    day_of_month: Optional[int] = None
+    day_of_week: Optional[int] = None
+    is_active: Optional[int] = None
+
+
+class RecurringRuleOut(BaseModel):
+    id: int
+    name: str
+    frequency: str
+    amount: float
+    type: str
+    description: str
+    category_id: int
+    ledger_id: int
+    start_date: str
+    end_date: str
+    next_date: str
+    day_of_month: Optional[int]
+    day_of_week: Optional[int]
+    is_active: int
+    created_at: datetime
+
+
+class RecurringLogOut(BaseModel):
+    id: int
+    rule_id: int
+    transaction_id: Optional[int]
+    generated_date: str
+    status: str
+    message: str
+    created_at: datetime
+
+
+class GenerateResult(BaseModel):
+    total_rules: int
+    generated_count: int
+    skipped_count: int
+    details: List[str]
