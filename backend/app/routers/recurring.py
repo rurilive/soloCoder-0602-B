@@ -287,6 +287,7 @@ def generate_transactions(db: Session = Depends(get_db)):
     details = []
     generated_count = 0
     skipped_count = 0
+    MAX_PER_RULE = 1000
 
     rules = db.query(RecurringRule).filter(RecurringRule.is_active == 1).all()
 
@@ -294,72 +295,90 @@ def generate_transactions(db: Session = Depends(get_db)):
         if not rule.next_date:
             continue
         try:
-            next_d = _parse_date(rule.next_date)
-        except ValueError:
-            continue
-
-        if rule.end_date:
-            try:
+            end_d = None
+            if rule.end_date:
                 end_d = _parse_date(rule.end_date)
                 if today > end_d:
                     rule.is_active = 0
                     details.append(f"规则#{rule.id}({rule.name})已过结束日期，已停用")
                     continue
+        except ValueError:
+            end_d = None
+
+        loop_count = 0
+        while loop_count < MAX_PER_RULE:
+            try:
+                next_d = _parse_date(rule.next_date)
             except ValueError:
-                pass
+                break
 
-        if next_d > today:
-            skipped_count += 1
-            continue
+            if end_d and next_d > end_d:
+                rule.is_active = 0
+                details.append(f"规则#{rule.id}({rule.name})已到结束日期{rule.end_date}，已停用")
+                break
 
-        tx_date_str = rule.next_date
+            if next_d > today:
+                break
 
-        existing_log = (
-            db.query(RecurringLog)
-            .filter(
-                RecurringLog.rule_id == rule.id,
-                RecurringLog.generated_date == tx_date_str,
+            loop_count += 1
+            tx_date_str = rule.next_date
+
+            existing_log = (
+                db.query(RecurringLog)
+                .filter(
+                    RecurringLog.rule_id == rule.id,
+                    RecurringLog.generated_date == tx_date_str,
+                )
+                .first()
             )
-            .first()
-        )
-        if existing_log:
-            skipped_count += 1
-            details.append(f"规则#{rule.id}({rule.name})日期{tx_date_str}已生成，跳过")
+            if existing_log:
+                skipped_count += 1
+                details.append(f"规则#{rule.id}({rule.name})日期{tx_date_str}已生成，跳过")
+
+                new_next = _calc_next_date(rule, next_d)
+                if not new_next or new_next <= next_d:
+                    break
+                rule.next_date = _fmt_date(new_next)
+                continue
+
+            tx = Transaction(
+                amount=rule.amount,
+                type=rule.type,
+                description=rule.description or f"[周期]{rule.name}",
+                category_id=rule.category_id,
+                ledger_id=rule.ledger_id,
+                date=tx_date_str,
+            )
+            db.add(tx)
+            db.flush()
+
+            log = RecurringLog(
+                rule_id=rule.id,
+                transaction_id=tx.id,
+                generated_date=tx_date_str,
+                status="success",
+                message=f"已生成交易 #{tx.id}",
+            )
+            db.add(log)
 
             new_next = _calc_next_date(rule, next_d)
-            if new_next and new_next != next_d:
-                rule.next_date = _fmt_date(new_next)
-                details.append(f"规则#{rule.id}({rule.name})已过执行日，推进下次执行到{rule.next_date}")
-            continue
+            if not new_next or new_next <= next_d:
+                details.append(
+                    f"规则#{rule.id}({rule.name})已生成交易，日期{tx_date_str}，无法计算下次执行日期，停止"
+                )
+                generated_count += 1
+                break
 
-        tx = Transaction(
-            amount=rule.amount,
-            type=rule.type,
-            description=rule.description or f"[周期]{rule.name}",
-            category_id=rule.category_id,
-            ledger_id=rule.ledger_id,
-            date=tx_date_str,
-        )
-        db.add(tx)
-        db.flush()
-
-        log = RecurringLog(
-            rule_id=rule.id,
-            transaction_id=tx.id,
-            generated_date=tx_date_str,
-            status="success",
-            message=f"已生成交易 #{tx.id}",
-        )
-        db.add(log)
-
-        new_next = _calc_next_date(rule, next_d)
-        if new_next:
             rule.next_date = _fmt_date(new_next)
+            generated_count += 1
+            details.append(
+                f"规则#{rule.id}({rule.name})已生成交易，日期{tx_date_str}，下次执行{rule.next_date}"
+            )
 
-        generated_count += 1
-        details.append(
-            f"规则#{rule.id}({rule.name})已生成交易，日期{tx_date_str}，下次执行{rule.next_date}"
-        )
+        if loop_count >= MAX_PER_RULE:
+            details.append(
+                f"规则#{rule.id}({rule.name})达到单次补齐上限{MAX_PER_RULE}，已停止，剩余下次再处理"
+            )
 
     db.commit()
 
