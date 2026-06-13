@@ -51,13 +51,13 @@ def budget_progress(
 ):
     start, end = _month_range(year, month)
 
-    budgets = (
-        db.query(Budget)
-        .filter(Budget.ledger_id == ledger_id, Budget.year == year, Budget.month == month)
+    all_expense_categories = (
+        db.query(Category)
+        .filter(Category.ledger_id == ledger_id, Category.type == "expense")
         .all()
     )
 
-    if not budgets:
+    if not all_expense_categories:
         return BudgetProgressSummary(
             year=year,
             month=month,
@@ -68,8 +68,14 @@ def budget_progress(
             items=[],
         )
 
-    category_ids = [b.category_id for b in budgets]
+    budgets = (
+        db.query(Budget)
+        .filter(Budget.ledger_id == ledger_id, Budget.year == year, Budget.month == month)
+        .all()
+    )
+    budget_map = {b.category_id: b for b in budgets}
 
+    all_cat_ids = [c.id for c in all_expense_categories]
     spent_rows = (
         db.query(Transaction.category_id, func.sum(Transaction.amount).label("spent"))
         .filter(
@@ -77,43 +83,44 @@ def budget_progress(
             Transaction.date >= start,
             Transaction.date < end,
             Transaction.type == "expense",
-            Transaction.category_id.in_(category_ids),
+            Transaction.category_id.in_(all_cat_ids),
         )
         .group_by(Transaction.category_id)
         .all()
     )
     spent_map = {r.category_id: float(r.spent or 0) for r in spent_rows}
 
-    categories = db.query(Category).filter(Category.id.in_(category_ids)).all()
-    cat_map = {c.id: c for c in categories}
-
     items = []
     total_budget = 0.0
     total_spent = 0.0
-    total_remaining = 0.0
     overbudget_count = 0
 
-    for b in budgets:
-        spent = spent_map.get(b.category_id, 0.0)
-        remaining = b.amount - spent
-        remaining_ratio = round(remaining / b.amount, 4) if b.amount > 0 else 0.0
-        is_overbudget = spent > b.amount
+    for cat in all_expense_categories:
+        budget = budget_map.get(cat.id)
+        has_budget = budget is not None
+        budget_amount = budget.amount if has_budget else 0.0
+        spent = spent_map.get(cat.id, 0.0)
+        remaining = budget_amount - spent
+        remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
+        is_overbudget = has_budget and spent > budget_amount
 
-        cat = cat_map.get(b.category_id)
         items.append(
             BudgetProgressItem(
-                category_id=b.category_id,
-                category_name=cat.name if cat else "未知",
-                category_icon=cat.icon if cat else "",
-                budget_amount=b.amount,
+                budget_id=budget.id if has_budget else None,
+                category_id=cat.id,
+                category_name=cat.name,
+                category_icon=cat.icon or "",
+                budget_amount=budget_amount,
                 spent=spent,
                 remaining=round(remaining, 2),
                 remaining_ratio=remaining_ratio,
                 is_overbudget=is_overbudget,
+                has_budget=has_budget,
             )
         )
 
-        total_budget += b.amount
+        if has_budget:
+            total_budget += budget_amount
         total_spent += spent
         if is_overbudget:
             overbudget_count += 1
@@ -141,6 +148,14 @@ def get_budget(budget_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=BudgetOut)
 def create_budget(data: BudgetCreate, db: Session = Depends(get_db)):
+    category = db.query(Category).filter(Category.id == data.category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    if category.ledger_id != data.ledger_id:
+        raise HTTPException(status_code=400, detail="该分类不属于当前账本")
+    if category.type != "expense":
+        raise HTTPException(status_code=400, detail="只能为支出分类设置预算")
+
     existing = (
         db.query(Budget)
         .filter(
@@ -153,9 +168,7 @@ def create_budget(data: BudgetCreate, db: Session = Depends(get_db)):
     )
     if existing:
         raise HTTPException(status_code=400, detail="该分类本月已设置预算")
-    category = db.query(Category).filter(Category.id == data.category_id).first()
-    if not category:
-        raise HTTPException(status_code=404, detail="分类不存在")
+
     budget = Budget(**data.model_dump())
     db.add(budget)
     db.commit()

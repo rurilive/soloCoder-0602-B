@@ -171,6 +171,7 @@ class BudgetOut(BaseModel):
 
 
 class BudgetProgressItem(BaseModel):
+    budget_id: Optional[int]
     category_id: int
     category_name: str
     category_icon: str
@@ -179,6 +180,7 @@ class BudgetProgressItem(BaseModel):
     remaining: float
     remaining_ratio: float
     is_overbudget: bool
+    has_budget: bool
 
 
 class BudgetProgressSummary(BaseModel):

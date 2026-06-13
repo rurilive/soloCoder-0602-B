@@ -17,6 +17,7 @@ import {
   Tag,
   Empty,
   Spin,
+  Divider,
 } from 'antd';
 import {
   PlusOutlined,
@@ -25,6 +26,7 @@ import {
   CheckCircleOutlined,
   DollarOutlined,
   ExclamationCircleOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { budgetApi, categoryApi } from '../services/api';
@@ -103,7 +105,11 @@ export default function BudgetManagement({ currentLedger }) {
       month,
     };
     if (editItem) {
-      await budgetApi.update(editItem.id, { amount: values.amount });
+      if (editItem.budget_id != null) {
+        await budgetApi.update(editItem.budget_id, { amount: values.amount });
+      } else {
+        await budgetApi.create(payload);
+      }
       message.success('预算更新成功');
     } else {
       await budgetApi.create(payload);
@@ -133,16 +139,113 @@ export default function BudgetManagement({ currentLedger }) {
     setEditItem(item);
     form.setFieldsValue({
       category_id: item.category_id,
-      amount: item.amount,
+      amount: item.budget_amount > 0 ? item.budget_amount : undefined,
     });
     setModalOpen(true);
   };
 
   const existingCategoryIds = budgets.map((b) => b.category_id);
 
-  const availableCategories = editItem
-    ? categories
+  const availableCategories = editItem && editItem.budget_id != null
+    ? categories.filter((c) => c.id === editItem.category_id)
     : categories.filter((c) => !existingCategoryIds.includes(c.id));
+
+  const budgetedItems = (progress?.items || []).filter((i) => i.has_budget);
+  const unbudgetedItems = (progress?.items || []).filter((i) => !i.has_budget);
+
+  const renderBudgetedItem = (item) => {
+    const percent = item.budget_amount > 0
+      ? Math.min(Math.round((item.spent / item.budget_amount) * 100), 100)
+      : 0;
+    const color = getProgressColor(item.remaining_ratio);
+    const isOver = item.is_overbudget;
+
+    return (
+      <div
+        key={item.category_id}
+        style={{
+          padding: '12px 16px',
+          borderRadius: 8,
+          border: isOver ? '2px solid #ff4d4f' : '1px solid #f0f0f0',
+          background: isOver ? '#fff2f0' : '#fafafa',
+          animation: isOver ? 'overbudgetBlink 1.5s ease-in-out infinite' : 'none',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <Space>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>
+              {item.category_name}
+            </span>
+            {isOver && (
+              <Tag color="error" icon={<ExclamationCircleOutlined />}>
+                超支
+              </Tag>
+            )}
+          </Space>
+          <Space size="large">
+            <span style={{ color: '#999', fontSize: 13 }}>
+              预算 ¥{item.budget_amount.toFixed(2)}
+            </span>
+            <span style={{ color: '#ff4d4f', fontSize: 13 }}>
+              已花 ¥{item.spent.toFixed(2)}
+            </span>
+            <span style={{ color: item.remaining >= 0 ? '#52c41a' : '#ff4d4f', fontSize: 13, fontWeight: 600 }}>
+              {item.remaining >= 0 ? '剩余' : '超支'} ¥{Math.abs(item.remaining).toFixed(2)}
+            </span>
+            <Button type="link" size="small" onClick={() => openEdit(item)}>
+              编辑
+            </Button>
+            <Popconfirm title="确定删除此预算？" onConfirm={() => handleDelete(item.budget_id)}>
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        </div>
+        <Progress
+          percent={percent}
+          strokeColor={color}
+          trailColor="#f0f0f0"
+          size="small"
+          format={() => `${percent}%`}
+        />
+      </div>
+    );
+  };
+
+  const renderUnbudgetedItem = (item) => (
+    <div
+      key={item.category_id}
+      style={{
+        padding: '10px 16px',
+        borderRadius: 8,
+        border: '1px dashed #d9d9d9',
+        background: '#fafafa',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <span style={{ fontWeight: 500, fontSize: 14, color: '#666' }}>
+            {item.category_name}
+          </span>
+          <Tag color="default">未设预算</Tag>
+          {item.spent > 0 && (
+            <span style={{ color: '#ff4d4f', fontSize: 13 }}>
+              本月已花 ¥{item.spent.toFixed(2)}
+            </span>
+          )}
+        </Space>
+        <Button
+          type="link"
+          size="small"
+          icon={<SettingOutlined />}
+          onClick={() => openEdit(item)}
+        >
+          设置预算
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div>
@@ -175,7 +278,7 @@ export default function BudgetManagement({ currentLedger }) {
                     value={progress.total_budget}
                     prefix={<DollarOutlined />}
                     precision={2}
-                    valueStyle={{ color: '#1677ff' }}
+                    styles={{ content: { color: '#1677ff' } }}
                   />
                 </Card>
               </Col>
@@ -186,7 +289,7 @@ export default function BudgetManagement({ currentLedger }) {
                     value={progress.total_spent}
                     prefix={<DollarOutlined />}
                     precision={2}
-                    valueStyle={{ color: '#ff4d4f' }}
+                    styles={{ content: { color: '#ff4d4f' } }}
                   />
                 </Card>
               </Col>
@@ -197,7 +300,7 @@ export default function BudgetManagement({ currentLedger }) {
                     value={progress.total_remaining}
                     prefix={<DollarOutlined />}
                     precision={2}
-                    valueStyle={{ color: progress.total_remaining >= 0 ? '#52c41a' : '#ff4d4f' }}
+                    styles={{ content: { color: progress.total_remaining >= 0 ? '#52c41a' : '#ff4d4f' } }}
                   />
                 </Card>
               </Col>
@@ -207,109 +310,46 @@ export default function BudgetManagement({ currentLedger }) {
                     title="超支分类"
                     value={progress.overbudget_count}
                     prefix={progress.overbudget_count > 0 ? <WarningOutlined /> : <CheckCircleOutlined />}
-                    valueStyle={{ color: progress.overbudget_count > 0 ? '#ff4d4f' : '#52c41a' }}
-                    suffix={`/ ${progress.items.length}`}
+                    styles={{ content: { color: progress.overbudget_count > 0 ? '#ff4d4f' : '#52c41a' } }}
+                    suffix={`/ ${budgetedItems.length}`}
                   />
                 </Card>
               </Col>
             </Row>
 
-            <Card title="各分类预算进度" size="small">
-              <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                {progress.items.map((item) => {
-                  const percent = item.budget_amount > 0
-                    ? Math.min(Math.round((item.spent / item.budget_amount) * 100), 100)
-                    : 0;
-                  const color = getProgressColor(item.remaining_ratio);
-                  const isOver = item.is_overbudget;
-
-                  return (
-                    <div
-                      key={item.category_id}
-                      style={{
-                        padding: '12px 16px',
-                        borderRadius: 8,
-                        border: isOver ? '2px solid #ff4d4f' : '1px solid #f0f0f0',
-                        background: isOver ? '#fff2f0' : '#fafafa',
-                        animation: isOver ? 'overbudgetBlink 1.5s ease-in-out infinite' : 'none',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <Space>
-                          <span style={{ fontWeight: 600, fontSize: 15 }}>
-                            {item.category_name}
-                          </span>
-                          {isOver && (
-                            <Tag color="error" icon={<ExclamationCircleOutlined />}>
-                              超支
-                            </Tag>
-                          )}
-                        </Space>
-                        <Space size="large">
-                          <span style={{ color: '#999', fontSize: 13 }}>
-                            预算 ¥{item.budget_amount.toFixed(2)}
-                          </span>
-                          <span style={{ color: '#ff4d4f', fontSize: 13 }}>
-                            已花 ¥{item.spent.toFixed(2)}
-                          </span>
-                          <span style={{ color: item.remaining >= 0 ? '#52c41a' : '#ff4d4f', fontSize: 13, fontWeight: 600 }}>
-                            {item.remaining >= 0 ? '剩余' : '超支'} ¥{Math.abs(item.remaining).toFixed(2)}
-                          </span>
-                        </Space>
-                      </div>
-                      <Progress
-                        percent={percent}
-                        strokeColor={color}
-                        trailColor="#f0f0f0"
-                        size="small"
-                        format={() => `${percent}%`}
-                      />
-                    </div>
-                  );
-                })}
-              </Space>
+            <Card title={`已设预算 (${budgetedItems.length})`} size="small">
+              {budgetedItems.length > 0 ? (
+                <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  {budgetedItems.map(renderBudgetedItem)}
+                </Space>
+              ) : (
+                <Empty description="暂无已设置的预算" style={{ padding: 20 }} />
+              )}
             </Card>
 
-            <Card title="预算列表" size="small" style={{ marginTop: 16 }}>
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                {budgets.map((b) => {
-                  const cat = categories.find((c) => c.id === b.category_id);
-                  return (
-                    <div
-                      key={b.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #f0f0f0',
-                      }}
-                    >
-                      <Space>
-                        <Tag color="blue">{cat?.name || `分类#${b.category_id}`}</Tag>
-                        <span style={{ fontWeight: 600 }}>¥{b.amount.toFixed(2)}</span>
-                      </Space>
-                      <Space>
-                        <Button type="link" size="small" onClick={() => openEdit(b)}>
-                          编辑
-                        </Button>
-                        <Popconfirm title="确定删除此预算？" onConfirm={() => handleDelete(b.id)}>
-                          <Button type="link" size="small" danger>
-                            删除
-                          </Button>
-                        </Popconfirm>
-                      </Space>
-                    </div>
-                  );
-                })}
-              </Space>
-            </Card>
+            {unbudgetedItems.length > 0 && (
+              <>
+                <Divider style={{ margin: '16px 0' }} />
+                <Card
+                  title={
+                    <span style={{ color: '#888' }}>
+                      未设预算 ({unbudgetedItems.length})
+                    </span>
+                  }
+                  size="small"
+                  style={{ borderStyle: 'dashed' }}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    {unbudgetedItems.map(renderUnbudgetedItem)}
+                  </Space>
+                </Card>
+              </>
+            )}
           </>
         ) : (
           !loading && (
             <Empty
-              description={`暂无${year}年${month}月预算，请点击「新建预算」设置`}
+              description={`该账本暂无支出分类，请先创建支出分类`}
               style={{ padding: 60 }}
             />
           )
@@ -317,7 +357,7 @@ export default function BudgetManagement({ currentLedger }) {
       </Spin>
 
       <Modal
-        title={editItem ? '编辑预算' : '新建预算'}
+        title={editItem ? (editItem.budget_id != null ? '编辑预算' : '设置预算') : '新建预算'}
         open={modalOpen}
         onOk={handleSubmit}
         onCancel={() => {
@@ -336,7 +376,7 @@ export default function BudgetManagement({ currentLedger }) {
             rules={[{ required: true, message: '请选择分类' }]}
           >
             <Select
-              disabled={!!editItem}
+              disabled={!!(editItem && editItem.budget_id != null)}
               options={availableCategories.map((c) => ({
                 label: c.name,
                 value: c.id,
