@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import between
 from typing import List, Optional
 
 from app.database import get_db
@@ -24,6 +23,15 @@ def _validate_category(db, category_id, ledger_id, tx_type):
     return cat
 
 
+def _month_range(year: int, month: int):
+    start = f"{year:04d}-{month:02d}-01"
+    if month == 12:
+        end = f"{year + 1:04d}-01-01"
+    else:
+        end = f"{year:04d}-{month + 1:02d}-01"
+    return start, end
+
+
 @router.get("/", response_model=List[TransactionOut])
 def list_transactions(
     ledger_id: Optional[int] = Query(None),
@@ -37,11 +45,7 @@ def list_transactions(
     if ledger_id is not None:
         query = query.filter(Transaction.ledger_id == ledger_id)
     if year is not None and month is not None:
-        start = f"{year:04d}-{month:02d}-01"
-        if month == 12:
-            end = f"{year:04d}-12-31"
-        else:
-            end = f"{year:04d}-{month + 1:02d}-01"
+        start, end = _month_range(year, month)
         query = query.filter(Transaction.date >= start, Transaction.date < end)
     if category_id is not None:
         query = query.filter(Transaction.category_id == category_id)

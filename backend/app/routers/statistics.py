@@ -10,6 +10,15 @@ from app.schemas import MonthlySummary, CategoryStat
 router = APIRouter(prefix="/api/statistics", tags=["statistics"])
 
 
+def _month_range(year: int, month: int):
+    start = f"{year:04d}-{month:02d}-01"
+    if month == 12:
+        end = f"{year + 1:04d}-01-01"
+    else:
+        end = f"{year:04d}-{month + 1:02d}-01"
+    return start, end
+
+
 @router.get("/monthly", response_model=MonthlySummary)
 def monthly_summary(
     ledger_id: int = Query(...),
@@ -17,10 +26,10 @@ def monthly_summary(
     month: int = Query(...),
     db: Session = Depends(get_db),
 ):
-    prefix = f"{year}-{month:02d}"
+    start, end = _month_range(year, month)
     rows = (
         db.query(Transaction.type, func.sum(Transaction.amount), func.count())
-        .filter(Transaction.ledger_id == ledger_id, Transaction.date.like(f"{prefix}%"))
+        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
         .group_by(Transaction.type)
         .all()
     )
@@ -51,7 +60,7 @@ def category_stats(
     type: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    prefix = f"{year}-{month:02d}"
+    start, end = _month_range(year, month)
     query = (
         db.query(
             Transaction.category_id,
@@ -61,7 +70,7 @@ def category_stats(
             func.sum(Transaction.amount).label("total"),
         )
         .join(Category, Transaction.category_id == Category.id)
-        .filter(Transaction.ledger_id == ledger_id, Transaction.date.like(f"{prefix}%"))
+        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
     )
     if type:
         query = query.filter(Category.type == type)
