@@ -1,0 +1,11 @@
+[project]
+name = "bookkeeper-backend"
+version = "0.1.0"
+description = "个人记账应用后端"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+]
