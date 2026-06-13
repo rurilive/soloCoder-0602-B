@@ -65,6 +65,7 @@ def budget_progress(
             total_spent=0,
             total_remaining=0,
             overbudget_count=0,
+            unbudgeted_spent=0,
             items=[],
         )
 
@@ -93,6 +94,7 @@ def budget_progress(
     items = []
     total_budget = 0.0
     total_spent = 0.0
+    unbudgeted_spent = 0.0
     overbudget_count = 0
 
     for cat in all_expense_categories:
@@ -121,7 +123,9 @@ def budget_progress(
 
         if has_budget:
             total_budget += budget_amount
-        total_spent += spent
+            total_spent += spent
+        else:
+            unbudgeted_spent += spent
         if is_overbudget:
             overbudget_count += 1
 
@@ -134,6 +138,7 @@ def budget_progress(
         total_spent=round(total_spent, 2),
         total_remaining=total_remaining,
         overbudget_count=overbudget_count,
+        unbudgeted_spent=round(unbudgeted_spent, 2),
         items=items,
     )
 

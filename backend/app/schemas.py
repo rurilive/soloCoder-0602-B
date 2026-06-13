@@ -190,6 +190,7 @@ class BudgetProgressSummary(BaseModel):
     total_spent: float
     total_remaining: float
     overbudget_count: int
+    unbudgeted_spent: float
     items: List[BudgetProgressItem]
 
 
