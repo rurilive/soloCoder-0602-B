@@ -194,8 +194,6 @@ export default function Recurring({ currentLedger }) {
 
   const openEdit = (record) => {
     setEditItem(record);
-    const categoryList = categories.filter((c) => c.type === record.type);
-    setCategories(categoryList.length > 0 ? categoryList : categories);
     form.setFieldsValue({
       ...record,
       start_date: record.start_date ? dayjs(record.start_date) : null,

@@ -25,24 +25,52 @@ def _fmt_date(d: date) -> str:
     return d.strftime("%Y-%m-%d")
 
 
-def _safe_add_months(d: date, months: int) -> date:
-    month = d.month - 1 + months
-    year = d.year + month // 12
-    month = month % 12 + 1
-    day = d.day
-    last_day = calendar.monthrange(year, month)[1]
-    if day > last_day:
-        day = last_day
-    return date(year, month, day)
+def _find_monthly_day(year: int, month: int, day_of_month: int) -> date:
+    while True:
+        last_day = calendar.monthrange(year, month)[1]
+        if day_of_month <= last_day:
+            return date(year, month, day_of_month)
+        overflow = day_of_month - last_day
+        if month == 12:
+            year += 1
+            month = 1
+        else:
+            month += 1
+        day_of_month = overflow
+
+
+def _next_monthly_after(from_date: date, day_of_month: int) -> date:
+    year = from_date.year
+    month = from_date.month
+    candidate = _find_monthly_day(year, month, day_of_month)
+    if candidate > from_date:
+        return candidate
+    if month == 12:
+        year += 1
+        month = 1
+    else:
+        month += 1
+    return _find_monthly_day(year, month, day_of_month)
+
+
+def _first_monthly_on_or_after(from_date: date, day_of_month: int) -> date:
+    year = from_date.year
+    month = from_date.month
+    candidate = _find_monthly_day(year, month, day_of_month)
+    if candidate >= from_date:
+        return candidate
+    if month == 12:
+        year += 1
+        month = 1
+    else:
+        month += 1
+    return _find_monthly_day(year, month, day_of_month)
 
 
 def _calc_next_date(rule: RecurringRule, from_date: date) -> Optional[date]:
     if rule.frequency == "monthly":
         dom = rule.day_of_month or from_date.day
-        result = _safe_add_months(from_date, 1)
-        last_day = calendar.monthrange(result.year, result.month)[1]
-        day = min(dom, last_day)
-        return date(result.year, result.month, day)
+        return _next_monthly_after(from_date, dom)
     elif rule.frequency == "weekly":
         dow = rule.day_of_week or from_date.weekday()
         days_ahead = dow - from_date.weekday()
@@ -51,13 +79,11 @@ def _calc_next_date(rule: RecurringRule, from_date: date) -> Optional[date]:
         return from_date + timedelta(days=days_ahead)
     elif rule.frequency == "yearly":
         dom = rule.day_of_month or from_date.day
-        next_year = from_date.year + 1
-        last_day = calendar.monthrange(next_year, from_date.month)[1]
-        day = min(dom, last_day)
-        try:
-            return date(next_year, from_date.month, day)
-        except ValueError:
-            return date(next_year, from_date.month, last_day)
+        start_month = _parse_date(rule.start_date).month if rule.start_date else from_date.month
+        candidate = _find_monthly_day(from_date.year, start_month, dom)
+        if candidate > from_date:
+            return candidate
+        return _find_monthly_day(from_date.year + 1, start_month, dom)
     else:
         return None
 
@@ -66,39 +92,24 @@ def _compute_initial_next(rule_data: dict) -> str:
     start = _parse_date(rule_data["start_date"])
     freq = rule_data.get("frequency")
     today = date.today()
+    anchor = start if start > today else today
     if freq == "monthly":
         dom = rule_data.get("day_of_month") or start.day
-        cur = date(today.year, today.month, 1)
-        while True:
-            last_day = calendar.monthrange(cur.year, cur.month)[1]
-            day = min(dom, last_day)
-            candidate = date(cur.year, cur.month, day)
-            if candidate >= start and candidate >= today:
-                return _fmt_date(candidate)
-            cur = _safe_add_months(cur, 1)
-            if cur.year > today.year + 10:
-                return _fmt_date(start)
+        return _fmt_date(_first_monthly_on_or_after(anchor, dom))
     elif freq == "weekly":
-        dow = rule_data.get("day_of_week") or start.weekday()
-        cur = today
-        days_ahead = dow - cur.weekday()
+        dow = rule_data.get("day_of_week") if rule_data.get("day_of_week") is not None else start.weekday()
+        days_ahead = dow - anchor.weekday()
         if days_ahead < 0:
             days_ahead += 7
-        candidate = cur + timedelta(days=days_ahead)
+        candidate = anchor + timedelta(days=days_ahead)
         if candidate < start:
             candidate += timedelta(days=7)
         return _fmt_date(candidate)
     elif freq == "yearly":
         dom = rule_data.get("day_of_month") or start.day
-        cur = date(today.year, start.month, 1)
-        last_day = calendar.monthrange(cur.year, cur.month)[1]
-        day = min(dom, last_day)
-        candidate = date(cur.year, cur.month, day)
+        candidate = _find_monthly_day(today.year, start.month, dom)
         if candidate < start or candidate < today:
-            next_year = today.year + 1
-            last_day = calendar.monthrange(next_year, start.month)[1]
-            day = min(dom, last_day)
-            candidate = date(next_year, start.month, day)
+            candidate = _find_monthly_day(today.year + 1, start.month, dom)
         return _fmt_date(candidate)
     return _fmt_date(start)
 
@@ -188,22 +199,15 @@ def preview_dates(rule_id: int, count: int = 5, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="规则不存在")
     results = []
     current = _parse_date(rule.start_date)
-    if current < date.today():
-        current = date.today()
+    today = date.today()
+    if current < today:
+        current = today
     if rule.frequency == "monthly":
         dom = rule.day_of_month or current.day
-        cur_year, cur_month = current.year, current.month
+        cursor = _first_monthly_on_or_after(current, dom)
         while len(results) < count:
-            last_day = calendar.monthrange(cur_year, cur_month)[1]
-            day = min(dom, last_day)
-            candidate = date(cur_year, cur_month, day)
-            if candidate >= current:
-                results.append(_fmt_date(candidate))
-            if cur_month == 12:
-                cur_month = 1
-                cur_year += 1
-            else:
-                cur_month += 1
+            results.append(_fmt_date(cursor))
+            cursor = _next_monthly_after(cursor, dom)
     elif rule.frequency == "weekly":
         dow = rule.day_of_week or current.weekday()
         days_ahead = dow - current.weekday()
@@ -215,14 +219,13 @@ def preview_dates(rule_id: int, count: int = 5, db: Session = Depends(get_db)):
             candidate += timedelta(days=7)
     elif rule.frequency == "yearly":
         dom = rule.day_of_month or current.day
-        cur_year = current.year
+        start_month = _parse_date(rule.start_date).month
+        candidate = _find_monthly_day(current.year, start_month, dom)
+        if candidate < current:
+            candidate = _find_monthly_day(current.year + 1, start_month, dom)
         while len(results) < count:
-            last_day = calendar.monthrange(cur_year, _parse_date(rule.start_date).month)[1]
-            day = min(dom, last_day)
-            candidate = date(cur_year, _parse_date(rule.start_date).month, day)
-            if candidate >= current:
-                results.append(_fmt_date(candidate))
-            cur_year += 1
+            results.append(_fmt_date(candidate))
+            candidate = _find_monthly_day(candidate.year + 1, start_month, dom)
     return results
 
 
@@ -236,23 +239,14 @@ def preview_dates_from_data(data: dict, count: int = 5):
     if freq not in ("monthly", "weekly", "yearly"):
         raise HTTPException(status_code=400, detail="frequency 必须是 monthly/weekly/yearly")
     results = []
-    current = start
-    if current < date.today():
-        current = date.today()
+    today = date.today()
+    current = start if start > today else today
     if freq == "monthly":
         dom = data.get("day_of_month") or start.day
-        cur_year, cur_month = current.year, current.month
+        cursor = _first_monthly_on_or_after(current, dom)
         while len(results) < count:
-            last_day = calendar.monthrange(cur_year, cur_month)[1]
-            day = min(dom, last_day)
-            candidate = date(cur_year, cur_month, day)
-            if candidate >= current:
-                results.append(_fmt_date(candidate))
-            if cur_month == 12:
-                cur_month = 1
-                cur_year += 1
-            else:
-                cur_month += 1
+            results.append(_fmt_date(cursor))
+            cursor = _next_monthly_after(cursor, dom)
     elif freq == "weekly":
         dow = data.get("day_of_week")
         if dow is None:
@@ -266,14 +260,12 @@ def preview_dates_from_data(data: dict, count: int = 5):
             candidate += timedelta(days=7)
     elif freq == "yearly":
         dom = data.get("day_of_month") or start.day
-        cur_year = current.year
+        candidate = _find_monthly_day(current.year, start.month, dom)
+        if candidate < current:
+            candidate = _find_monthly_day(current.year + 1, start.month, dom)
         while len(results) < count:
-            last_day = calendar.monthrange(cur_year, start.month)[1]
-            day = min(dom, last_day)
-            candidate = date(cur_year, start.month, day)
-            if candidate >= current:
-                results.append(_fmt_date(candidate))
-            cur_year += 1
+            results.append(_fmt_date(candidate))
+            candidate = _find_monthly_day(candidate.year + 1, start.month, dom)
     return results
 
 
@@ -292,7 +284,6 @@ def list_logs(
 @router.post("/generate", response_model=GenerateResult)
 def generate_transactions(db: Session = Depends(get_db)):
     today = date.today()
-    today_str = _fmt_date(today)
     details = []
     generated_count = 0
     skipped_count = 0
@@ -321,24 +312,33 @@ def generate_transactions(db: Session = Depends(get_db)):
             skipped_count += 1
             continue
 
+        tx_date_str = rule.next_date
+
         existing_log = (
             db.query(RecurringLog)
-            .filter(RecurringLog.rule_id == rule.id, RecurringLog.generated_date == today_str)
+            .filter(
+                RecurringLog.rule_id == rule.id,
+                RecurringLog.generated_date == tx_date_str,
+            )
             .first()
         )
         if existing_log:
             skipped_count += 1
-            details.append(f"规则#{rule.id}({rule.name})今日已生成，跳过")
+            details.append(f"规则#{rule.id}({rule.name})日期{tx_date_str}已生成，跳过")
+
+            new_next = _calc_next_date(rule, next_d)
+            if new_next and new_next != next_d:
+                rule.next_date = _fmt_date(new_next)
+                details.append(f"规则#{rule.id}({rule.name})已过执行日，推进下次执行到{rule.next_date}")
             continue
 
-        tx_date = today_str
         tx = Transaction(
             amount=rule.amount,
             type=rule.type,
             description=rule.description or f"[周期]{rule.name}",
             category_id=rule.category_id,
             ledger_id=rule.ledger_id,
-            date=tx_date,
+            date=tx_date_str,
         )
         db.add(tx)
         db.flush()
@@ -346,18 +346,20 @@ def generate_transactions(db: Session = Depends(get_db)):
         log = RecurringLog(
             rule_id=rule.id,
             transaction_id=tx.id,
-            generated_date=today_str,
+            generated_date=tx_date_str,
             status="success",
             message=f"已生成交易 #{tx.id}",
         )
         db.add(log)
 
-        new_next = _calc_next_date(rule, today)
+        new_next = _calc_next_date(rule, next_d)
         if new_next:
             rule.next_date = _fmt_date(new_next)
 
         generated_count += 1
-        details.append(f"规则#{rule.id}({rule.name})已生成交易，日期{tx_date}，下次执行{rule.next_date}")
+        details.append(
+            f"规则#{rule.id}({rule.name})已生成交易，日期{tx_date_str}，下次执行{rule.next_date}"
+        )
 
     db.commit()
 
