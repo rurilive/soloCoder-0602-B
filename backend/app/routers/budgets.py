@@ -173,19 +173,22 @@ def budget_progress(
         has_unconverted = cat.id in unconverted_map
 
         unconverted_amounts = []
-        estimated_spent = spent
+        unconverted_total = 0.0
         if has_unconverted:
             unconverted_amounts = [
                 CurrencyAmount(currency=curr, amount=round(amt, 2))
                 for curr, amt in sorted(unconverted_map[cat.id].items())
             ]
             unconverted_total = sum(ca.amount for ca in unconverted_amounts)
-            estimated_spent = round(spent + unconverted_total, 2)
 
-        if has_budget:
-            remaining = budget_amount - estimated_spent
+        if has_unconverted:
+            is_overbudget = None
+            remaining = None
+            remaining_ratio = None
+        elif has_budget:
+            remaining = budget_amount - spent
             remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
-            is_overbudget = estimated_spent > budget_amount
+            is_overbudget = spent > budget_amount
         else:
             remaining = 0.0
             remaining_ratio = 0.0
@@ -199,7 +202,7 @@ def budget_progress(
                 category_icon=cat.icon or "",
                 budget_amount=budget_amount,
                 spent=spent,
-                remaining=round(remaining, 2),
+                remaining=round(remaining, 2) if remaining is not None else None,
                 remaining_ratio=remaining_ratio,
                 is_overbudget=is_overbudget,
                 has_budget=has_budget,
@@ -210,10 +213,10 @@ def budget_progress(
 
         if has_budget:
             total_budget += budget_amount
-            total_spent += spent
+            total_spent += spent + unconverted_total
         else:
-            unbudgeted_spent += spent
-        if is_overbudget:
+            unbudgeted_spent += spent + unconverted_total
+        if is_overbudget is True:
             overbudget_count += 1
 
     total_remaining = round(total_budget - total_spent, 2)
