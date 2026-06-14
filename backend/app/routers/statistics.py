@@ -94,22 +94,23 @@ def category_stats(
     db: Session = Depends(get_db),
 ):
     start, end = _month_range(year, month)
-    query = (
-        db.query(
-            Transaction.category_id,
-            Category.name.label("category_name"),
-            Category.icon.label("category_icon"),
-            Category.type.label("cat_type"),
-            func.sum(Transaction.amount).label("total"),
-        )
-        .join(Category, Transaction.category_id == Category.id)
-        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
-    )
-    if type:
-        query = query.filter(Category.type == type)
-    rows = query.group_by(Transaction.category_id).all()
 
     if not target_currency:
+        query = (
+            db.query(
+                Transaction.category_id,
+                Category.name.label("category_name"),
+                Category.icon.label("category_icon"),
+                Category.type.label("cat_type"),
+                func.sum(Transaction.amount).label("total"),
+            )
+            .join(Category, Transaction.category_id == Category.id)
+            .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+        )
+        if type:
+            query = query.filter(Category.type == type)
+        rows = query.group_by(Transaction.category_id).all()
+
         total_all = sum(float(r.total or 0) for r in rows)
         result = []
         for r in rows:

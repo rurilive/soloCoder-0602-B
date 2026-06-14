@@ -13,7 +13,7 @@ export default function MonthlyReport({ currentLedger }) {
   const [incomeStats, setIncomeStats] = useState([]);
   const [dailyData, setDailyData] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  const [displayCurrency, setDisplayCurrency] = useState(null);
+  const [displayCurrency, setDisplayCurrency] = useState(currentLedger?.base_currency || 'CNY');
 
   const baseCurrency = currentLedger?.base_currency || 'CNY';
 
