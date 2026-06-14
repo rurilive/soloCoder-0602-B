@@ -122,18 +122,19 @@ export default function Reconciliation({ currentLedger }) {
       message.error('请选择账户');
       return;
     }
-    if (!expenseCategoryId) {
-      message.error('请选择支出分类');
-      return;
-    }
-    if (!incomeCategoryId) {
-      message.error('请选择收入分类');
-      return;
-    }
 
     const selectedRecords = unmatchedBank.filter((r) => selectedBankRows.includes(r.row_index));
     const hasExpense = selectedRecords.some((r) => r.type === 'expense');
     const hasIncome = selectedRecords.some((r) => r.type === 'income');
+
+    if (hasExpense && !expenseCategoryId) {
+      message.error('选中的记录包含支出，请选择支出分类');
+      return;
+    }
+    if (hasIncome && !incomeCategoryId) {
+      message.error('选中的记录包含收入，请选择收入分类');
+      return;
+    }
 
     Modal.confirm({
       title: '确认导入',
@@ -162,13 +163,15 @@ export default function Reconciliation({ currentLedger }) {
             description: r.description,
           }));
 
-          const result = await reconciliationApi.import({
+          const payload = {
             ledger_id: currentLedger.id,
             account_id: selectedAccount,
-            expense_category_id: expenseCategoryId,
-            income_category_id: incomeCategoryId,
             records,
-          });
+          };
+          if (hasExpense) payload.expense_category_id = expenseCategoryId;
+          if (hasIncome) payload.income_category_id = incomeCategoryId;
+
+          const result = await reconciliationApi.import(payload);
 
           message.success(
             `导入成功：${result.imported_count} 条已导入，${result.skipped_count} 条跳过`
@@ -188,11 +191,28 @@ export default function Reconciliation({ currentLedger }) {
   };
 
   const handleManualMatch = () => {
-    if (!selectedBank || !selectedSystem) {
-      if (selectedBankForManual.length === 0 || selectedSystemForManual.length === 0) {
-        message.warning('请先从左右两侧选择要配对的记录');
-        return;
-      }
+    const hasSingleSelect = !!selectedBank && !!selectedSystem;
+    const hasBatchSelect = selectedBankForManual.length > 0 && selectedSystemForManual.length > 0;
+
+    if (hasSingleSelect) {
+      const newPair = {
+        bank_record: selectedBank,
+        system_transaction: selectedSystem,
+        score: 0.0,
+        amount_diff: Math.abs(selectedBank.amount - selectedSystem.amount) >= 0.001,
+        date_diff: 0,
+        manual: true,
+      };
+      setMatchedPairs([...matchedPairs, newPair]);
+      setUnmatchedBank(unmatchedBank.filter((r) => r.row_index !== selectedBank.row_index));
+      setUnmatchedSystem(unmatchedSystem.filter((t) => t.id !== selectedSystem.id));
+      setSelectedBank(null);
+      setSelectedSystem(null);
+      message.success('手动匹配成功');
+      return;
+    }
+
+    if (hasBatchSelect) {
       if (selectedBankForManual.length !== selectedSystemForManual.length) {
         message.warning(
           `批量配对数量不一致：银行记录 ${selectedBankForManual.length} 条，系统交易 ${selectedSystemForManual.length} 条`
@@ -233,20 +253,8 @@ export default function Reconciliation({ currentLedger }) {
       message.success(`批量手动匹配成功：${newPairs.length} 对`);
       return;
     }
-    const newPair = {
-      bank_record: selectedBank,
-      system_transaction: selectedSystem,
-      score: 0.0,
-      amount_diff: Math.abs(selectedBank.amount - selectedSystem.amount) >= 0.001,
-      date_diff: 0,
-      manual: true,
-    };
-    setMatchedPairs([...matchedPairs, newPair]);
-    setUnmatchedBank(unmatchedBank.filter((r) => r.row_index !== selectedBank.row_index));
-    setUnmatchedSystem(unmatchedSystem.filter((t) => t.id !== selectedSystem.id));
-    setSelectedBank(null);
-    setSelectedSystem(null);
-    message.success('手动匹配成功');
+
+    message.warning('请先从左右两侧选择要配对的记录');
   };
 
   const handleUnmatch = (pair) => {
@@ -262,9 +270,13 @@ export default function Reconciliation({ currentLedger }) {
 
   const handleRowSelect = (type, record) => {
     if (type === 'bank') {
-      setSelectedBank(selectedBank?.row_index === record.row_index ? null : record);
+      const isSame = selectedBank?.row_index === record.row_index;
+      setSelectedBank(isSame ? null : record);
+      setSelectedBankForManual([]);
     } else {
-      setSelectedSystem(selectedSystem?.id === record.id ? null : record);
+      const isSame = selectedSystem?.id === record.id;
+      setSelectedSystem(isSame ? null : record);
+      setSelectedSystemForManual([]);
     }
   };
 
@@ -793,7 +805,7 @@ export default function Reconciliation({ currentLedger }) {
                           selectedRowKeys: selectedBankForManual,
                           onChange: (keys) => {
                             setSelectedBankForManual(keys);
-                            setSelectedBank(null);
+                            if (keys.length > 0) setSelectedBank(null);
                           },
                         }
                       : {

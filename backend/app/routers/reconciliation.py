@@ -98,8 +98,17 @@ def import_unmatched_records(
     _validate_ledger(db, data.ledger_id)
     _validate_account(db, data.account_id, data.ledger_id)
 
-    _validate_category(db, data.expense_category_id, data.ledger_id, "expense")
-    _validate_category(db, data.income_category_id, data.ledger_id, "income")
+    has_expense = any(r.type == "expense" for r in data.records)
+    has_income = any(r.type == "income" for r in data.records)
+
+    if has_expense:
+        if data.expense_category_id is None:
+            raise HTTPException(status_code=400, detail="包含支出记录，请提供支出分类")
+        _validate_category(db, data.expense_category_id, data.ledger_id, "expense")
+    if has_income:
+        if data.income_category_id is None:
+            raise HTTPException(status_code=400, detail="包含收入记录，请提供收入分类")
+        _validate_category(db, data.income_category_id, data.ledger_id, "income")
 
     imported = []
 
