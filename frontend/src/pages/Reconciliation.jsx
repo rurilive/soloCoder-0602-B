@@ -51,7 +51,9 @@ export default function Reconciliation({ currentLedger }) {
 
   const [uploaded, setUploaded] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [uploadedFile, setUploadedFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [rematching, setRematching] = useState(false);
   const [importing, setImporting] = useState(false);
   const [selectedBankRows, setSelectedBankRows] = useState([]);
   const [activeTab, setActiveTab] = useState('matched');
@@ -72,6 +74,18 @@ export default function Reconciliation({ currentLedger }) {
     const end = dateRange[1].format('YYYY-MM-DD');
     return unmatchedSystem.filter((t) => t.date >= start && t.date <= end);
   }, [unmatchedSystem, dateRange]);
+
+  useEffect(() => {
+    if (selectedSystemForManual.length === 0) return;
+    const visibleIds = new Set(filteredUnmatchedSystem.map((t) => t.id));
+    const filtered = selectedSystemForManual.filter((id) => visibleIds.has(id));
+    if (filtered.length !== selectedSystemForManual.length) {
+      setSelectedSystemForManual(filtered);
+    }
+    if (selectedSystem && !visibleIds.has(selectedSystem.id)) {
+      setSelectedSystem(null);
+    }
+  }, [filteredUnmatchedSystem, selectedSystemForManual, selectedSystem]);
 
   const fileInputRef = useRef(null);
 
@@ -95,16 +109,20 @@ export default function Reconciliation({ currentLedger }) {
 
   useEffect(() => { fetchRefData(); }, [currentLedger]);
 
-  const handleUpload = async (file) => {
+  const doUpload = async (file, isRematch = false) => {
     if (!currentLedger) {
       message.error('请先选择账本');
       return false;
     }
-    if (!selectedAccount) {
+    if (!selectedAccount && !isRematch) {
       message.error('请先选择默认账户');
       return false;
     }
-    setLoading(true);
+    if (isRematch) {
+      setRematching(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const result = await reconciliationApi.upload(
         file,
@@ -118,15 +136,38 @@ export default function Reconciliation({ currentLedger }) {
       setUnmatchedSystem(result.unmatched_system);
       setUploaded(true);
       setSelectedBankRows([]);
+      setSelectedBankForManual([]);
+      setSelectedSystemForManual([]);
+      setSelectedBank(null);
+      setSelectedSystem(null);
       message.success(
-        `解析成功：共 ${result.total_bank_records} 条银行记录，自动匹配 ${result.matched_count} 对`
+        isRematch
+          ? `重新匹配完成：自动匹配 ${result.matched_count} 对`
+          : `解析成功：共 ${result.total_bank_records} 条银行记录，自动匹配 ${result.matched_count} 对`
       );
     } catch (e) {
-      message.error(e.message || '上传失败');
+      message.error(e.message || (isRematch ? '重新匹配失败' : '上传失败'));
     } finally {
-      setLoading(false);
+      if (isRematch) {
+        setRematching(false);
+      } else {
+        setLoading(false);
+      }
     }
     return false;
+  };
+
+  const handleUpload = async (file) => {
+    setUploadedFile(file);
+    return doUpload(file, false);
+  };
+
+  const handleRematch = async () => {
+    if (!uploadedFile) {
+      message.warning('请先上传文件');
+      return;
+    }
+    await doUpload(uploadedFile, true);
   };
 
   const handleImport = async () => {
@@ -535,6 +576,26 @@ export default function Reconciliation({ currentLedger }) {
           </Col>
         </Row>
 
+        <Card style={{ marginTop: 16 }}>
+          <Space>
+            <CalendarOutlined style={{ color: '#1677ff' }} />
+            <Text strong>日期范围筛选（可选）：</Text>
+            <RangePicker
+              value={dateRange}
+              onChange={(dates) => setDateRange(dates)}
+              format="YYYY-MM-DD"
+              placeholder={['开始日期', '结束日期']}
+              allowClear
+            />
+            {dateRange && (
+              <Button size="small" onClick={() => setDateRange(null)}>
+                清除
+              </Button>
+            )}
+            <Text type="secondary">上传前选择可减少匹配时的干扰项</Text>
+          </Space>
+        </Card>
+
         <Divider />
 
         <Card>
@@ -640,9 +701,9 @@ export default function Reconciliation({ currentLedger }) {
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
-        <Space>
+        <Space wrap>
           <CalendarOutlined style={{ color: '#1677ff' }} />
-          <Text strong>日期范围筛选：</Text>
+          <Text strong>日期范围：</Text>
           <RangePicker
             value={dateRange}
             onChange={(dates) => {
@@ -657,9 +718,18 @@ export default function Reconciliation({ currentLedger }) {
               size="small"
               onClick={() => setDateRange(null)}
             >
-              清除筛选
+              清除
             </Button>
           )}
+          <Button
+            type="primary"
+            icon={<ImportOutlined />}
+            loading={rematching}
+            onClick={handleRematch}
+          >
+            重新匹配
+          </Button>
+          <Text type="secondary">修改日期后点击重新匹配，用新范围过滤系统交易并重新对账</Text>
         </Space>
       </Card>
 
@@ -932,12 +1002,15 @@ export default function Reconciliation({ currentLedger }) {
           <Button onClick={() => {
             setUploaded(false);
             setUploadResult(null);
+            setUploadedFile(null);
             setMatchedPairs([]);
             setUnmatchedBank([]);
             setUnmatchedSystem([]);
             setSelectedBankRows([]);
             setSelectedBankForManual([]);
             setSelectedSystemForManual([]);
+            setSelectedBank(null);
+            setSelectedSystem(null);
             setDateRange(null);
           }}>
             重新上传
