@@ -18,6 +18,7 @@ import {
   Empty,
   Spin,
   Divider,
+  Tooltip,
 } from 'antd';
 import {
   PlusOutlined,
@@ -294,20 +295,22 @@ export default function BudgetManagement({ currentLedger }) {
                 </Card>
               </Col>
               <Col flex="1">
-                <Card size="small">
-                  <Statistic
-                    title="未设预算分类支出"
-                    value={progress.unbudgeted_spent || 0}
-                    prefix={<DollarOutlined />}
-                    precision={2}
-                    valueStyle={{ color: '#d48806' }}
-                  />
-                </Card>
+                <Tooltip title="这些分类尚未设置月度预算，支出不受预算控制">
+                  <Card size="small">
+                    <Statistic
+                      title="未设预算分类支出"
+                      value={progress.unbudgeted_spent || 0}
+                      prefix={<DollarOutlined />}
+                      precision={2}
+                      valueStyle={{ color: '#d48806' }}
+                    />
+                  </Card>
+                </Tooltip>
               </Col>
               <Col flex="1">
                 <Card size="small">
                   <Statistic
-                    title="剩余"
+                    title="预算内剩余"
                     value={progress.total_remaining}
                     prefix={<DollarOutlined />}
                     precision={2}
