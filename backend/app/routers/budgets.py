@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict, Tuple
+from datetime import datetime, date
 
 from app.database import get_db
-from app.models import Budget, Category, Transaction, Ledger
+from app.models import Budget, Category, Transaction, Ledger, Account
+from app.exchange_rate import convert_amount, get_rate
 from app.schemas import (
     BudgetCreate,
     BudgetUpdate,
@@ -59,6 +60,25 @@ def list_budgets(
     return query.order_by(Budget.id.desc()).all()
 
 
+def _build_rate_cache(
+    db: Session,
+    currencies: set,
+    target_currency: str,
+    rate_date: str | None = None,
+) -> Dict[Tuple[str, str], float]:
+    cache: Dict[Tuple[str, str], float] = {}
+    for cur in currencies:
+        if cur == target_currency:
+            cache[(cur, target_currency)] = 1.0
+            continue
+        try:
+            rate, _, _ = get_rate(db, cur, target_currency, rate_date)
+            cache[(cur, target_currency)] = rate
+        except ValueError:
+            cache[(cur, target_currency)] = 1.0
+    return cache
+
+
 @router.get("/progress", response_model=BudgetProgressSummary)
 def budget_progress(
     ledger_id: int = Query(...),
@@ -66,7 +86,13 @@ def budget_progress(
     month: int = Query(...),
     db: Session = Depends(get_db),
 ):
+    ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
+    if not ledger:
+        raise HTTPException(status_code=404, detail="账本不存在")
+    base_currency = ledger.base_currency
+
     start, end = _month_range(year, month)
+    mid_date = f"{year:04d}-{month:02d}-15"
 
     all_expense_categories = (
         db.query(Category)
@@ -93,9 +119,14 @@ def budget_progress(
     )
     budget_map = {b.category_id: b for b in budgets}
 
+    accounts = db.query(Account).filter(Account.ledger_id == ledger_id).all()
+    account_currency_map = {a.id: a.currency for a in accounts}
+    unique_currencies = {a.currency for a in accounts}
+    rate_cache = _build_rate_cache(db, unique_currencies, base_currency, mid_date)
+
     all_cat_ids = [c.id for c in all_expense_categories]
-    spent_rows = (
-        db.query(Transaction.category_id, func.sum(Transaction.amount).label("spent"))
+    tx_rows = (
+        db.query(Transaction.category_id, Transaction.account_id, Transaction.amount)
         .filter(
             Transaction.ledger_id == ledger_id,
             Transaction.date >= start,
@@ -103,10 +134,16 @@ def budget_progress(
             Transaction.type == "expense",
             Transaction.category_id.in_(all_cat_ids),
         )
-        .group_by(Transaction.category_id)
         .all()
     )
-    spent_map = {r.category_id: float(r.spent or 0) for r in spent_rows}
+
+    spent_map: Dict[int, float] = {}
+    for r in tx_rows:
+        cat_id = r.category_id
+        acct_currency = account_currency_map.get(r.account_id, base_currency)
+        rate = rate_cache.get((acct_currency, base_currency), 1.0)
+        converted = float(r.amount) * rate
+        spent_map[cat_id] = spent_map.get(cat_id, 0.0) + converted
 
     items = []
     total_budget = 0.0
@@ -118,7 +155,7 @@ def budget_progress(
         budget = budget_map.get(cat.id)
         has_budget = budget is not None
         budget_amount = budget.amount if has_budget else 0.0
-        spent = spent_map.get(cat.id, 0.0)
+        spent = round(spent_map.get(cat.id, 0.0), 2)
         remaining = budget_amount - spent
         remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
         is_overbudget = has_budget and spent > budget_amount
@@ -151,7 +188,7 @@ def budget_progress(
     return BudgetProgressSummary(
         year=year,
         month=month,
-        total_budget=total_budget,
+        total_budget=round(total_budget, 2),
         total_spent=round(total_spent, 2),
         total_remaining=total_remaining,
         overbudget_count=overbudget_count,
@@ -170,6 +207,7 @@ def suggest_budgets(
     ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
     if not ledger:
         raise HTTPException(status_code=404, detail="账本不存在")
+    base_currency = ledger.base_currency
 
     categories = (
         db.query(Category)
@@ -245,12 +283,25 @@ def suggest_budgets(
         last_end_m += 1
     last_end = f"{last_end_y:04d}-{last_end_m:02d}-01"
 
+    accounts = db.query(Account).filter(Account.ledger_id == ledger_id).all()
+    account_currency_map = {a.id: a.currency for a in accounts}
+    unique_currencies = {a.currency for a in accounts}
+
+    month_rate_caches: Dict[str, Dict[Tuple[str, str], float]] = {}
+    for y, m in available_months:
+        month_key = f"{y:04d}-{m:02d}"
+        mid_date = f"{y:04d}-{m:02d}-15"
+        month_rate_caches[month_key] = _build_rate_cache(
+            db, unique_currencies, base_currency, mid_date
+        )
+
     cat_ids = [c.id for c in categories]
-    rows = (
+    tx_rows = (
         db.query(
             Transaction.category_id,
             func.strftime("%Y-%m", Transaction.date).label("month"),
-            func.sum(Transaction.amount).label("total"),
+            Transaction.account_id,
+            Transaction.amount,
         )
         .filter(
             Transaction.ledger_id == ledger_id,
@@ -259,14 +310,19 @@ def suggest_budgets(
             Transaction.date >= first_start,
             Transaction.date < last_end,
         )
-        .group_by(Transaction.category_id, "month")
         .all()
     )
 
-    cat_month_totals = {}
-    for r in rows:
-        key = (r.category_id, r.month)
-        cat_month_totals[key] = float(r.total or 0)
+    cat_month_totals: Dict[Tuple[int, str], float] = {}
+    for r in tx_rows:
+        cat_id = r.category_id
+        month_key = r.month
+        acct_currency = account_currency_map.get(r.account_id, base_currency)
+        rate_cache = month_rate_caches.get(month_key, {})
+        rate = rate_cache.get((acct_currency, base_currency), 1.0)
+        converted = float(r.amount) * rate
+        key = (cat_id, month_key)
+        cat_month_totals[key] = cat_month_totals.get(key, 0.0) + converted
 
     total_months = len(available_months)
 
