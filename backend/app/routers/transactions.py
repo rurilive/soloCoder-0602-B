@@ -25,7 +25,7 @@ def _validate_category(db, category_id, ledger_id, tx_type):
 
 def _validate_account(db, account_id, ledger_id):
     if account_id is None:
-        return None
+        raise HTTPException(status_code=400, detail="账户不能为空")
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=400, detail="账户不存在")
@@ -97,8 +97,8 @@ def update_transaction(
     final_category = update_dict.get("category_id", tx.category_id)
     if "category_id" in update_dict or "type" in update_dict or "ledger_id" in update_dict:
         _validate_category(db, final_category, final_ledger, final_type)
-    if "account_id" in update_dict or "ledger_id" in update_dict:
-        _validate_account(db, update_dict.get("account_id", tx.account_id), final_ledger)
+    if "account_id" in update_dict:
+        _validate_account(db, update_dict["account_id"], final_ledger)
     for key, value in update_dict.items():
         setattr(tx, key, value)
     db.commit()

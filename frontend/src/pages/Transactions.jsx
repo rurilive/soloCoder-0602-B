@@ -57,20 +57,27 @@ export default function Transactions({ currentLedger }) {
 
   const openEdit = (record) => {
     setEditItem(record);
-    form.setFieldsValue({ ...record, date: dayjs(record.date) });
+    form.setFieldsValue({
+      ...record,
+      date: dayjs(record.date),
+      account_id: record.account_id ?? defaultAccount?.id,
+    });
     setModalOpen(true);
   };
 
   const openCreate = () => {
     setEditItem(null);
     form.resetFields();
-    const defaultAcc = accounts.find((a) => a.is_default);
-    form.setFieldsValue({ type: 'expense', date: dayjs(), account_id: defaultAcc?.id });
+    form.setFieldsValue({ type: 'expense', date: dayjs(), account_id: defaultAccount?.id });
     setModalOpen(true);
   };
 
   const catMap = {};
   categories.forEach((c) => { catMap[c.id] = c.name; });
+  const accountMap = {};
+  accounts.forEach((a) => { accountMap[a.id] = a.name; });
+
+  const defaultAccount = accounts.find((a) => a.is_default) || accounts[0];
 
   const incomeCats = categories.filter((c) => c.type === 'income');
   const expenseCats = categories.filter((c) => c.type === 'expense');
@@ -82,6 +89,10 @@ export default function Transactions({ currentLedger }) {
       render: (t) => <Tag color={t === 'income' ? 'green' : 'red'}>{t === 'income' ? '收入' : '支出'}</Tag>,
     },
     { title: '分类', dataIndex: 'category_id', key: 'category_id', width: 100, render: (id) => catMap[id] || id },
+    {
+      title: '账户', dataIndex: 'account_id', key: 'account_id', width: 110,
+      render: (id) => id ? (accountMap[id] || id) : <span style={{ color: '#999' }}>未指定</span>,
+    },
     { title: '描述', dataIndex: 'description', key: 'description' },
     {
       title: '金额', dataIndex: 'amount', key: 'amount', width: 130, align: 'right',
@@ -128,8 +139,8 @@ export default function Transactions({ currentLedger }) {
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="account_id" label="账户">
-            <Select allowClear placeholder="请选择账户">
+          <Form.Item name="account_id" label="账户" rules={[{ required: true, message: '请选择账户' }]}>
+            <Select placeholder="请选择账户">
               {accounts.map((a) => (
                 <Select.Option key={a.id} value={a.id}>
                   {a.name} (¥{a.balance.toFixed(2)})
