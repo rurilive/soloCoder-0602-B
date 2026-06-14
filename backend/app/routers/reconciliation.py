@@ -51,6 +51,8 @@ def _validate_account(db, account_id, ledger_id):
 async def upload_bank_statement(
     file: UploadFile = File(...),
     ledger_id: int = Form(...),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     _validate_ledger(db, ledger_id)
@@ -67,11 +69,12 @@ async def upload_bank_statement(
     if not bank_records:
         raise HTTPException(status_code=400, detail="未解析到有效记录，请检查CSV格式")
 
-    system_transactions = (
-        db.query(Transaction)
-        .filter(Transaction.ledger_id == ledger_id)
-        .all()
-    )
+    query = db.query(Transaction).filter(Transaction.ledger_id == ledger_id)
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    system_transactions = query.all()
 
     result = match_records(bank_records, system_transactions)
 

@@ -162,10 +162,12 @@ async function uploadRequest(url, formData) {
 }
 
 export const reconciliationApi = {
-  upload: (file, ledgerId) => {
+  upload: (file, ledgerId, startDate, endDate) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('ledger_id', String(ledgerId));
+    if (startDate) formData.append('start_date', startDate);
+    if (endDate) formData.append('end_date', endDate);
     return uploadRequest('/reconciliation/upload', formData);
   },
   import: (data) => request('/reconciliation/import', {

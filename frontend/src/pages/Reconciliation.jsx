@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Row,
   Col,
@@ -17,6 +17,7 @@ import {
   Typography,
   Divider,
   Tooltip,
+  DatePicker,
 } from 'antd';
 import {
   UploadOutlined,
@@ -26,6 +27,7 @@ import {
   UnorderedListOutlined,
   BankOutlined,
   LinkOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import {
   reconciliationApi,
@@ -38,6 +40,7 @@ const { Title, Text } = Typography;
 const { Dragger } = Upload;
 const { Option, OptGroup } = Select;
 const { TabPane } = Tabs;
+const { RangePicker } = DatePicker;
 
 export default function Reconciliation({ currentLedger }) {
   const [accounts, setAccounts] = useState([]);
@@ -61,6 +64,14 @@ export default function Reconciliation({ currentLedger }) {
   const [matchedPairs, setMatchedPairs] = useState([]);
   const [unmatchedBank, setUnmatchedBank] = useState([]);
   const [unmatchedSystem, setUnmatchedSystem] = useState([]);
+  const [dateRange, setDateRange] = useState(null);
+
+  const filteredUnmatchedSystem = useMemo(() => {
+    if (!dateRange) return unmatchedSystem;
+    const start = dateRange[0].format('YYYY-MM-DD');
+    const end = dateRange[1].format('YYYY-MM-DD');
+    return unmatchedSystem.filter((t) => t.date >= start && t.date <= end);
+  }, [unmatchedSystem, dateRange]);
 
   const fileInputRef = useRef(null);
 
@@ -95,7 +106,12 @@ export default function Reconciliation({ currentLedger }) {
     }
     setLoading(true);
     try {
-      const result = await reconciliationApi.upload(file, currentLedger.id);
+      const result = await reconciliationApi.upload(
+        file,
+        currentLedger.id,
+        dateRange ? dateRange[0].format('YYYY-MM-DD') : null,
+        dateRange ? dateRange[1].format('YYYY-MM-DD') : null,
+      );
       setUploadResult(result);
       setMatchedPairs(result.matched_pairs);
       setUnmatchedBank(result.unmatched_bank);
@@ -602,7 +618,7 @@ export default function Reconciliation({ currentLedger }) {
           <Col span={4}>
             <Statistic
               title="未匹配系统交易"
-              value={unmatchedSystem.length}
+              value={filteredUnmatchedSystem.length}
               styles={{ content: { color: '#fa8c16' } }}
               prefix={<ExclamationCircleOutlined />}
             />
@@ -623,13 +639,37 @@ export default function Reconciliation({ currentLedger }) {
         </Row>
       </Card>
 
+      <Card style={{ marginBottom: 16 }}>
+        <Space>
+          <CalendarOutlined style={{ color: '#1677ff' }} />
+          <Text strong>日期范围筛选：</Text>
+          <RangePicker
+            value={dateRange}
+            onChange={(dates) => {
+              setDateRange(dates);
+            }}
+            format="YYYY-MM-DD"
+            placeholder={['开始日期', '结束日期']}
+            allowClear
+          />
+          {dateRange && (
+            <Button
+              size="small"
+              onClick={() => setDateRange(null)}
+            >
+              清除筛选
+            </Button>
+          )}
+        </Space>
+      </Card>
+
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         style={{ marginBottom: 16 }}
         items={[
           { key: 'matched', label: `已匹配 (${matchedPairs.length})` },
-          { key: 'unmatched', label: `未匹配 (${unmatchedBank.length + unmatchedSystem.length})` },
+          { key: 'unmatched', label: `未匹配 (${unmatchedBank.length + filteredUnmatchedSystem.length})` },
         ]}
       />
 
@@ -833,19 +873,19 @@ export default function Reconciliation({ currentLedger }) {
                 title={
                   <Space>
                     <UnorderedListOutlined />
-                    <span>系统交易 ({unmatchedSystem.length})</span>
+                    <span>系统交易 ({filteredUnmatchedSystem.length})</span>
                   </Space>
                 }
                 extra={
                   manualMode && (
                     <Checkbox
                       checked={
-                        selectedSystemForManual.length === unmatchedSystem.length
-                        && unmatchedSystem.length > 0
+                        selectedSystemForManual.length === filteredUnmatchedSystem.length
+                        && filteredUnmatchedSystem.length > 0
                       }
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedSystemForManual(unmatchedSystem.map((t) => t.id));
+                          setSelectedSystemForManual(filteredUnmatchedSystem.map((t) => t.id));
                         } else {
                           setSelectedSystemForManual([]);
                         }
@@ -863,13 +903,13 @@ export default function Reconciliation({ currentLedger }) {
                           selectedRowKeys: selectedSystemForManual,
                           onChange: (keys) => {
                             setSelectedSystemForManual(keys);
-                            setSelectedSystem(null);
+                            if (keys.length > 0) setSelectedSystem(null);
                           },
                         }
                       : undefined
                   }
                   columns={systemColumns}
-                  dataSource={unmatchedSystem}
+                  dataSource={filteredUnmatchedSystem}
                   rowKey="id"
                   onRow={(record) => ({
                     onClick: () => manualMode && handleRowSelect('system', record),
@@ -898,6 +938,7 @@ export default function Reconciliation({ currentLedger }) {
             setSelectedBankRows([]);
             setSelectedBankForManual([]);
             setSelectedSystemForManual([]);
+            setDateRange(null);
           }}>
             重新上传
           </Button>
