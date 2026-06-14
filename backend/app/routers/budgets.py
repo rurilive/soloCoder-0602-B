@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional, Dict, Tuple, Set
 from datetime import datetime
+import calendar
 
 from app.database import get_db
 from app.models import Budget, Category, Transaction, Ledger, Account
@@ -257,7 +258,6 @@ def budget_alerts(
     start, end = _month_range(year, month)
     mid_date = f"{year:04d}-{month:02d}-15"
 
-    import calendar
     days_total = calendar.monthrange(year, month)[1]
     today = datetime.now().date()
     target_year, target_month = year, month

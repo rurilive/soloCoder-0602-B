@@ -32,7 +32,7 @@ import {
   BulbOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { budgetApi, categoryApi } from '../services/api';
+import { budgetApi, categoryApi, CURRENCY_SYMBOLS } from '../services/api';
 
 function getProgressColor(ratio) {
   if (ratio < 0) return '#ff4d4f';
@@ -397,6 +397,7 @@ export default function BudgetManagement({ currentLedger }) {
                 const isSevere = alert.severity === 'severe';
                 const borderColor = isSevere ? '#ff4d4f' : '#faad14';
                 const bgColor = isSevere ? '#fff1f0' : '#fffbe6';
+                const curSym = CURRENCY_SYMBOLS[alerts.base_currency] || alerts.base_currency;
                 return (
                   <div
                     key={alert.category_id}
@@ -429,19 +430,19 @@ export default function BudgetManagement({ currentLedger }) {
                       <Col span={8}>
                         <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>当前消耗速率</div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: isSevere ? '#ff4d4f' : '#faad14' }}>
-                          ¥{alert.current_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
+                          {curSym}{alert.current_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
                         </div>
                       </Col>
                       <Col span={8}>
                         <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>理想速率</div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: '#1677ff' }}>
-                          ¥{alert.ideal_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
+                          {curSym}{alert.ideal_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
                         </div>
                       </Col>
                       <Col span={8}>
                         <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>预计月末超支</div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: '#ff4d4f' }}>
-                          ¥{alert.projected_overspend.toFixed(2)}
+                          {curSym}{alert.projected_overspend.toFixed(2)}
                         </div>
                       </Col>
                     </Row>
