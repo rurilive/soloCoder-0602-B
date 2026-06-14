@@ -285,6 +285,7 @@ class BudgetProgressItem(BaseModel):
     remaining_ratio: float
     is_overbudget: bool
     has_budget: bool
+    has_unconverted: bool = False
     unconverted_amounts: List["CurrencyAmount"] = []
 
 

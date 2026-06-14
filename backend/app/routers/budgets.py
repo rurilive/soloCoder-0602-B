@@ -169,12 +169,20 @@ def budget_progress(
         has_budget = budget is not None
         budget_amount = budget.amount if has_budget else 0.0
         spent = round(spent_map.get(cat.id, 0.0), 2)
-        remaining = budget_amount - spent
-        remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
-        is_overbudget = has_budget and spent > budget_amount
+
+        has_unconverted = cat.id in unconverted_map
+
+        if has_unconverted:
+            is_overbudget = True
+            remaining_ratio = 0.0
+            remaining = 0.0
+        else:
+            remaining = budget_amount - spent
+            remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
+            is_overbudget = has_budget and spent > budget_amount
 
         unconverted_amounts = []
-        if cat.id in unconverted_map:
+        if has_unconverted:
             unconverted_amounts = [
                 CurrencyAmount(currency=curr, amount=round(amt, 2))
                 for curr, amt in sorted(unconverted_map[cat.id].items())
@@ -192,6 +200,7 @@ def budget_progress(
                 remaining_ratio=remaining_ratio,
                 is_overbudget=is_overbudget,
                 has_budget=has_budget,
+                has_unconverted=has_unconverted,
                 unconverted_amounts=unconverted_amounts,
             )
         )
@@ -385,7 +394,7 @@ def suggest_budgets(
         unconverted_amounts = []
         if cat.id in cat_unconverted_totals:
             unconverted_amounts = [
-                CurrencyAmount(currency=curr, amount=round(amt / total_months, 2))
+                CurrencyAmount(currency=curr, amount=round(amt, 2))
                 for curr, amt in sorted(cat_unconverted_totals[cat.id].items())
             ]
 
