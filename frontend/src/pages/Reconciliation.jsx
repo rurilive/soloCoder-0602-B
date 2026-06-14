@@ -28,6 +28,7 @@ import {
   BankOutlined,
   LinkOutlined,
   CalendarOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import {
   reconciliationApi,
@@ -723,7 +724,7 @@ export default function Reconciliation({ currentLedger }) {
           )}
           <Button
             type="primary"
-            icon={<ImportOutlined />}
+            icon={<SyncOutlined />}
             loading={rematching}
             onClick={handleRematch}
           >
