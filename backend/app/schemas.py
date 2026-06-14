@@ -24,6 +24,82 @@ class LedgerOut(BaseModel):
     created_at: datetime
 
 
+class AccountCreate(BaseModel):
+    name: str
+    type: str = "cash"
+    icon: str = "wallet"
+    initial_balance: float = 0.0
+    is_default: bool = False
+    ledger_id: int
+
+
+class AccountUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    icon: Optional[str] = None
+    initial_balance: Optional[float] = None
+    is_default: Optional[bool] = None
+
+
+class AccountOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    type: str
+    icon: str
+    initial_balance: float
+    is_default: bool
+    ledger_id: int
+    created_at: datetime
+
+
+class AccountWithBalance(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    type: str
+    icon: str
+    initial_balance: float
+    is_default: bool
+    ledger_id: int
+    balance: float
+    created_at: datetime
+
+
+class TransferCreate(BaseModel):
+    from_account_id: int
+    to_account_id: int
+    amount: float
+    date: str
+    note: str = ""
+    ledger_id: int
+
+
+class TransferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    from_account_id: int
+    to_account_id: int
+    amount: float
+    date: str
+    note: str
+    ledger_id: int
+    created_at: datetime
+
+
+class TransferWithNames(BaseModel):
+    id: int
+    from_account_id: int
+    to_account_id: int
+    from_account_name: str
+    to_account_name: str
+    amount: float
+    date: str
+    note: str
+    ledger_id: int
+    created_at: datetime
+
+
 class CategoryCreate(BaseModel):
     name: str
     type: str
@@ -53,6 +129,7 @@ class TransactionCreate(BaseModel):
     description: str = ""
     category_id: int
     ledger_id: int
+    account_id: Optional[int] = None
     date: str
 
 
@@ -61,6 +138,7 @@ class TransactionUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     category_id: Optional[int] = None
+    account_id: Optional[int] = None
     date: Optional[str] = None
 
 
@@ -72,6 +150,7 @@ class TransactionOut(BaseModel):
     description: str
     category_id: int
     ledger_id: int
+    account_id: Optional[int] = None
     date: str
     created_at: datetime
 

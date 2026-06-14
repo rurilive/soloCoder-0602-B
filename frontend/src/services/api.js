@@ -88,3 +88,24 @@ export const recurringApi = {
   },
   generate: () => request('/recurring/generate', { method: 'POST' }),
 };
+
+export const accountApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/accounts/${qs ? '?' + qs : ''}`);
+  },
+  get: (id) => request(`/accounts/${id}`),
+  getBalance: (id) => request(`/accounts/${id}/balance`),
+  create: (data) => request('/accounts/', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id, force = false) => request(`/accounts/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+};
+
+export const transferApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/transfers/${qs ? '?' + qs : ''}`);
+  },
+  create: (data) => request('/transfers/', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) => request(`/transfers/${id}`, { method: 'DELETE' }),
+};

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -11,6 +11,19 @@ class Ledger(Base):
     name = Column(String(100), nullable=False)
     type = Column(String(50), default="personal")
     description = Column(Text, default="")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    type = Column(String(50), default="cash")
+    icon = Column(String(50), default="wallet")
+    initial_balance = Column(Float, default=0.0)
+    is_default = Column(Boolean, default=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -34,7 +47,21 @@ class Transaction(Base):
     description = Column(Text, default="")
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     date = Column(String(10), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class Transfer(Base):
+    __tablename__ = "transfers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    date = Column(String(10), nullable=False)
+    note = Column(Text, default="")
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
 

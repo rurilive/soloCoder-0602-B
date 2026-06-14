@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, SessionLocal, Base
-from app.models import Ledger, Category, Transaction, Budget
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers
 
 
 def seed_db():
@@ -19,6 +19,14 @@ def seed_db():
     db.commit()
     db.refresh(personal)
     db.refresh(family)
+
+    cash = Account(name="现金", type="cash", icon="money-collect", initial_balance=2000, is_default=True, ledger_id=personal.id)
+    bank_card = Account(name="银行卡", type="bank", icon="credit-card", initial_balance=50000, ledger_id=personal.id)
+    alipay = Account(name="支付宝", type="ewallet", icon="alipay-circle", initial_balance=8000, ledger_id=personal.id)
+    family_cash = Account(name="家庭现金", type="cash", icon="money-collect", initial_balance=5000, is_default=True, ledger_id=family.id)
+    family_bank = Account(name="家庭银行卡", type="bank", icon="credit-card", initial_balance=100000, ledger_id=family.id)
+    db.add_all([cash, bank_card, alipay, family_cash, family_bank])
+    db.commit()
 
     cats_personal = [
         Category(name="工资", type="income", icon="money-collect", ledger_id=personal.id),
@@ -42,20 +50,26 @@ def seed_db():
     db.commit()
 
     sample_txs = [
-        Transaction(amount=15000, type="income", description="6月工资", category_id=1, ledger_id=personal.id, date="2026-06-01"),
-        Transaction(amount=2000, type="income", description="自由职业收入", category_id=2, ledger_id=personal.id, date="2026-06-05"),
-        Transaction(amount=800, type="expense", description="日常餐饮", category_id=4, ledger_id=personal.id, date="2026-06-02"),
-        Transaction(amount=200, type="expense", description="地铁公交", category_id=5, ledger_id=personal.id, date="2026-06-03"),
-        Transaction(amount=1500, type="expense", description="网购衣服", category_id=6, ledger_id=personal.id, date="2026-06-06"),
-        Transaction(amount=300, type="expense", description="电影聚会", category_id=7, ledger_id=personal.id, date="2026-06-08"),
-        Transaction(amount=3000, type="expense", description="房租", category_id=8, ledger_id=personal.id, date="2026-06-01"),
-        Transaction(amount=25000, type="income", description="家庭工资", category_id=9, ledger_id=family.id, date="2026-06-01"),
-        Transaction(amount=5000, type="income", description="理财收益", category_id=10, ledger_id=family.id, date="2026-06-10"),
-        Transaction(amount=2000, type="expense", description="家庭餐饮", category_id=11, ledger_id=family.id, date="2026-06-02"),
-        Transaction(amount=3000, type="expense", description="孩子补习", category_id=12, ledger_id=family.id, date="2026-06-05"),
-        Transaction(amount=500, type="expense", description="体检", category_id=13, ledger_id=family.id, date="2026-06-07"),
+        Transaction(amount=15000, type="income", description="6月工资", category_id=1, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-01"),
+        Transaction(amount=2000, type="income", description="自由职业收入", category_id=2, ledger_id=personal.id, account_id=alipay.id, date="2026-06-05"),
+        Transaction(amount=800, type="expense", description="日常餐饮", category_id=4, ledger_id=personal.id, account_id=alipay.id, date="2026-06-02"),
+        Transaction(amount=200, type="expense", description="地铁公交", category_id=5, ledger_id=personal.id, account_id=cash.id, date="2026-06-03"),
+        Transaction(amount=1500, type="expense", description="网购衣服", category_id=6, ledger_id=personal.id, account_id=alipay.id, date="2026-06-06"),
+        Transaction(amount=300, type="expense", description="电影聚会", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-08"),
+        Transaction(amount=3000, type="expense", description="房租", category_id=8, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-01"),
+        Transaction(amount=25000, type="income", description="家庭工资", category_id=9, ledger_id=family.id, account_id=family_bank.id, date="2026-06-01"),
+        Transaction(amount=5000, type="income", description="理财收益", category_id=10, ledger_id=family.id, account_id=family_bank.id, date="2026-06-10"),
+        Transaction(amount=2000, type="expense", description="家庭餐饮", category_id=11, ledger_id=family.id, account_id=family_cash.id, date="2026-06-02"),
+        Transaction(amount=3000, type="expense", description="孩子补习", category_id=12, ledger_id=family.id, account_id=family_bank.id, date="2026-06-05"),
+        Transaction(amount=500, type="expense", description="体检", category_id=13, ledger_id=family.id, account_id=family_bank.id, date="2026-06-07"),
     ]
     db.add_all(sample_txs)
+    db.commit()
+
+    sample_transfers = [
+        Transfer(from_account_id=bank_card.id, to_account_id=alipay.id, amount=3000, date="2026-06-01", note="银行卡转入支付宝", ledger_id=personal.id),
+    ]
+    db.add_all(sample_transfers)
     db.commit()
     db.close()
 
@@ -83,6 +97,8 @@ app.include_router(transactions.router)
 app.include_router(statistics.router)
 app.include_router(recurring.router)
 app.include_router(budgets.router)
+app.include_router(accounts.router)
+app.include_router(transfers.router)
 
 
 @app.get("/api/health")
