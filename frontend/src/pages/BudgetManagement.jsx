@@ -52,6 +52,7 @@ export default function BudgetManagement({ currentLedger }) {
   const [progress, setProgress] = useState(null);
   const [budgets, setBudgets] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [alerts, setAlerts] = useState(null);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -99,11 +100,26 @@ export default function BudgetManagement({ currentLedger }) {
     setCategories(list);
   }, [currentLedger]);
 
+  const fetchAlerts = useCallback(async () => {
+    if (!currentLedger) return;
+    try {
+      const data = await budgetApi.alerts({
+        ledger_id: currentLedger.id,
+        year,
+        month,
+      });
+      setAlerts(data);
+    } catch {
+      setAlerts(null);
+    }
+  }, [currentLedger, year, month]);
+
   useEffect(() => {
     fetchProgress();
     fetchBudgets();
     fetchCategories();
-  }, [fetchProgress, fetchBudgets, fetchCategories]);
+    fetchAlerts();
+  }, [fetchProgress, fetchBudgets, fetchCategories, fetchAlerts]);
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
@@ -130,6 +146,7 @@ export default function BudgetManagement({ currentLedger }) {
     form.resetFields();
     fetchProgress();
     fetchBudgets();
+    fetchAlerts();
   };
 
   const handleDelete = async (id) => {
@@ -137,6 +154,7 @@ export default function BudgetManagement({ currentLedger }) {
     message.success('预算删除成功');
     fetchProgress();
     fetchBudgets();
+    fetchAlerts();
   };
 
   const handleSuggest = async () => {
@@ -188,6 +206,7 @@ export default function BudgetManagement({ currentLedger }) {
       setSuggestModalOpen(false);
       fetchProgress();
       fetchBudgets();
+      fetchAlerts();
     } catch (err) {
       message.error(err.message || '批量创建失败');
     } finally {
@@ -350,12 +369,89 @@ export default function BudgetManagement({ currentLedger }) {
         <Button icon={<BulbOutlined />} onClick={handleSuggest}>
           智能建议
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={fetchProgress}>
+        <Button icon={<ReloadOutlined />} onClick={() => { fetchProgress(); fetchAlerts(); }}>
           刷新
         </Button>
       </div>
 
       <Spin spinning={loading}>
+        {alerts && alerts.alerts && alerts.alerts.length > 0 && (
+          <Card
+            title={
+              <Space>
+                <WarningOutlined style={{ color: alerts.severe_count > 0 ? '#ff4d4f' : '#faad14' }} />
+                <span>智能预警</span>
+                {alerts.severe_count > 0 && (
+                  <Tag color="error">严重超速 {alerts.severe_count}</Tag>
+                )}
+                {alerts.warning_count > 0 && (
+                  <Tag color="warning">超速预警 {alerts.warning_count}</Tag>
+                )}
+              </Space>
+            }
+            size="small"
+            style={{ marginBottom: 24, borderColor: alerts.severe_count > 0 ? '#ffccc7' : '#ffe58f' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              {alerts.alerts.map((alert) => {
+                const isSevere = alert.severity === 'severe';
+                const borderColor = isSevere ? '#ff4d4f' : '#faad14';
+                const bgColor = isSevere ? '#fff1f0' : '#fffbe6';
+                return (
+                  <div
+                    key={alert.category_id}
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: 8,
+                      border: `2px solid ${borderColor}`,
+                      background: bgColor,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <Space>
+                        <span style={{ fontWeight: 700, fontSize: 16 }}>
+                          {alert.category_name}
+                        </span>
+                        <Tag color={isSevere ? 'error' : 'warning'} icon={<ExclamationCircleOutlined />}>
+                          {isSevere ? '严重超速' : '超速预警'}
+                        </Tag>
+                      </Space>
+                      <Space size="large">
+                        <span style={{ color: '#666', fontSize: 13 }}>
+                          已过 {alert.days_elapsed}/{alert.days_total} 天
+                        </span>
+                        <span style={{ color: borderColor, fontWeight: 700, fontSize: 15 }}>
+                          速率比 {(alert.ratio * 100).toFixed(0)}%
+                        </span>
+                      </Space>
+                    </div>
+                    <Row gutter={16}>
+                      <Col span={8}>
+                        <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>当前消耗速率</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: isSevere ? '#ff4d4f' : '#faad14' }}>
+                          ¥{alert.current_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
+                        </div>
+                      </Col>
+                      <Col span={8}>
+                        <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>理想速率</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: '#1677ff' }}>
+                          ¥{alert.ideal_rate.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 400, color: '#999' }}>/天</span>
+                        </div>
+                      </Col>
+                      <Col span={8}>
+                        <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>预计月末超支</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: '#ff4d4f' }}>
+                          ¥{alert.projected_overspend.toFixed(2)}
+                        </div>
+                      </Col>
+                    </Row>
+                  </div>
+                );
+              })}
+            </Space>
+          </Card>
+        )}
+
         {progress && progress.items.length > 0 ? (
           <>
             <Row gutter={16} style={{ marginBottom: 24 }}>

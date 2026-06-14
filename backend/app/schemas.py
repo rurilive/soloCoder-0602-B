@@ -379,6 +379,33 @@ class CurrencyInfo(BaseModel):
     symbol: str
 
 
+class BudgetAlertItem(BaseModel):
+    category_id: int
+    category_name: str
+    category_icon: str
+    budget_amount: float
+    spent: float
+    days_elapsed: int
+    days_total: int
+    current_rate: float
+    ideal_rate: float
+    ratio: float
+    severity: str
+    projected_overspend: float
+
+
+class BudgetAlertsResponse(BaseModel):
+    ledger_id: int
+    year: int
+    month: int
+    base_currency: str
+    conversion_status: str
+    failed_currencies: List[str] = []
+    severe_count: int
+    warning_count: int
+    alerts: List[BudgetAlertItem]
+
+
 BudgetProgressItem.model_rebuild()
 BudgetProgressSummary.model_rebuild()
 BudgetSuggestionItem.model_rebuild()

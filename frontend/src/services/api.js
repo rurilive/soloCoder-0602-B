@@ -88,6 +88,10 @@ export const budgetApi = {
     const qs = new URLSearchParams(params).toString();
     return request(`/budgets/suggest?${qs}`);
   },
+  alerts: (params) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/budgets/alerts?${qs}`);
+  },
   batchCreate: (data) => request('/budgets/batch', { method: 'POST', body: JSON.stringify(data) }),
 };
 

@@ -18,6 +18,8 @@ from app.schemas import (
     BudgetBatchCreateRequest,
     BudgetBatchCreateResult,
     CurrencyAmount,
+    BudgetAlertItem,
+    BudgetAlertsResponse,
 )
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
@@ -237,6 +239,167 @@ def budget_progress(
         base_currency=base_currency,
         conversion_status=conversion_status,
         failed_currencies=sorted(failed_currencies),
+    )
+
+
+@router.get("/alerts", response_model=BudgetAlertsResponse)
+def budget_alerts(
+    ledger_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
+    if not ledger:
+        raise HTTPException(status_code=404, detail="账本不存在")
+    base_currency = ledger.base_currency
+
+    start, end = _month_range(year, month)
+    mid_date = f"{year:04d}-{month:02d}-15"
+
+    import calendar
+    days_total = calendar.monthrange(year, month)[1]
+    today = datetime.now().date()
+    target_year, target_month = year, month
+    if today.year == target_year and today.month == target_month:
+        days_elapsed = today.day
+    elif today > datetime(target_year, target_month, days_total).date():
+        days_elapsed = days_total
+    elif today < datetime(target_year, target_month, 1).date():
+        days_elapsed = 0
+    else:
+        days_elapsed = 0
+
+    if days_elapsed == 0:
+        return BudgetAlertsResponse(
+            ledger_id=ledger_id,
+            year=year,
+            month=month,
+            base_currency=base_currency,
+            conversion_status="success",
+            failed_currencies=[],
+            severe_count=0,
+            warning_count=0,
+            alerts=[],
+        )
+
+    budgets = (
+        db.query(Budget)
+        .filter(Budget.ledger_id == ledger_id, Budget.year == year, Budget.month == month)
+        .all()
+    )
+    if not budgets:
+        return BudgetAlertsResponse(
+            ledger_id=ledger_id,
+            year=year,
+            month=month,
+            base_currency=base_currency,
+            conversion_status="success",
+            failed_currencies=[],
+            severe_count=0,
+            warning_count=0,
+            alerts=[],
+        )
+    budget_map = {b.category_id: b for b in budgets}
+    budgeted_cat_ids = list(budget_map.keys())
+
+    accounts = db.query(Account).filter(Account.ledger_id == ledger_id).all()
+    account_currency_map = {a.id: a.currency for a in accounts}
+    unique_currencies = {a.currency for a in accounts}
+    rate_cache, failed_currencies = _build_rate_cache(db, unique_currencies, base_currency, mid_date)
+
+    tx_rows = (
+        db.query(Transaction.category_id, Transaction.account_id, Transaction.amount)
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.date >= start,
+            Transaction.date < end,
+            Transaction.type == "expense",
+            Transaction.category_id.in_(budgeted_cat_ids),
+        )
+        .all()
+    )
+
+    spent_map: Dict[int, float] = {}
+    for r in tx_rows:
+        cat_id = r.category_id
+        acct_currency = account_currency_map.get(r.account_id, base_currency)
+        if (acct_currency, base_currency) in rate_cache:
+            rate = rate_cache[(acct_currency, base_currency)]
+            converted = float(r.amount) * rate
+            spent_map[cat_id] = spent_map.get(cat_id, 0.0) + converted
+
+    categories = (
+        db.query(Category)
+        .filter(Category.id.in_(budgeted_cat_ids))
+        .all()
+    )
+    cat_map = {c.id: c for c in categories}
+
+    alerts = []
+    for cat_id in budgeted_cat_ids:
+        cat = cat_map.get(cat_id)
+        budget = budget_map.get(cat_id)
+        if not cat or not budget:
+            continue
+
+        budget_amount = float(budget.amount)
+        if budget_amount <= 0:
+            continue
+
+        spent = round(spent_map.get(cat_id, 0.0), 2)
+        ideal_rate = budget_amount / days_total
+        current_rate = spent / days_elapsed if days_elapsed > 0 else 0.0
+        ratio = current_rate / ideal_rate if ideal_rate > 0 else 0.0
+        ratio = round(ratio, 4)
+
+        severity = None
+        if ratio >= 1.5:
+            severity = "severe"
+        elif ratio >= 1.2:
+            severity = "warning"
+
+        if severity is None:
+            continue
+
+        projected_total = current_rate * days_total
+        projected_overspend = round(max(0.0, projected_total - budget_amount), 2)
+
+        alerts.append(
+            BudgetAlertItem(
+                category_id=cat.id,
+                category_name=cat.name,
+                category_icon=cat.icon or "",
+                budget_amount=budget_amount,
+                spent=spent,
+                days_elapsed=days_elapsed,
+                days_total=days_total,
+                current_rate=round(current_rate, 2),
+                ideal_rate=round(ideal_rate, 2),
+                ratio=ratio,
+                severity=severity,
+                projected_overspend=projected_overspend,
+            )
+        )
+
+    alerts.sort(key=lambda a: (0 if a.severity == "severe" else 1, -a.ratio))
+    severe_count = sum(1 for a in alerts if a.severity == "severe")
+    warning_count = sum(1 for a in alerts if a.severity == "warning")
+
+    conversion_status = "success" if not failed_currencies else "partial"
+    if failed_currencies and len(failed_currencies) == len(unique_currencies - {base_currency}):
+        conversion_status = "failed"
+
+    return BudgetAlertsResponse(
+        ledger_id=ledger_id,
+        year=year,
+        month=month,
+        base_currency=base_currency,
+        conversion_status=conversion_status,
+        failed_currencies=sorted(failed_currencies),
+        severe_count=severe_count,
+        warning_count=warning_count,
+        alerts=alerts,
     )
 
 
