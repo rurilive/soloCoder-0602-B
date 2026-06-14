@@ -98,16 +98,25 @@ def import_unmatched_records(
     _validate_ledger(db, data.ledger_id)
     _validate_account(db, data.account_id, data.ledger_id)
 
+    _validate_category(db, data.expense_category_id, data.ledger_id, "expense")
+    _validate_category(db, data.income_category_id, data.ledger_id, "income")
+
     imported = []
 
     try:
         for rec in data.records:
-            _validate_category(db, data.category_id, data.ledger_id, rec.type)
+            if rec.type == "income":
+                category_id = data.income_category_id
+            elif rec.type == "expense":
+                category_id = data.expense_category_id
+            else:
+                raise HTTPException(status_code=400, detail=f"无效的交易类型: {rec.type}")
+
             tx_data = TransactionCreate(
                 amount=rec.amount,
                 type=rec.type,
                 description=rec.description,
-                category_id=data.category_id,
+                category_id=category_id,
                 ledger_id=data.ledger_id,
                 account_id=data.account_id,
                 date=rec.date,
@@ -124,6 +133,8 @@ def import_unmatched_records(
 
     except Exception as e:
         db.rollback()
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=f"导入失败，已全部回滚: {str(e)}")
 
     return {

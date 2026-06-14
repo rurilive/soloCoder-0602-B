@@ -31,7 +31,6 @@ import {
   reconciliationApi,
   accountApi,
   categoryApi,
-  CURRENCY_SYMBOLS,
   formatCurrency,
 } from '../services/api';
 
@@ -44,7 +43,8 @@ export default function Reconciliation({ currentLedger }) {
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [expenseCategoryId, setExpenseCategoryId] = useState(null);
+  const [incomeCategoryId, setIncomeCategoryId] = useState(null);
 
   const [uploaded, setUploaded] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
@@ -56,6 +56,8 @@ export default function Reconciliation({ currentLedger }) {
   const [manualMode, setManualMode] = useState(false);
   const [selectedBank, setSelectedBank] = useState(null);
   const [selectedSystem, setSelectedSystem] = useState(null);
+  const [selectedBankForManual, setSelectedBankForManual] = useState([]);
+  const [selectedSystemForManual, setSelectedSystemForManual] = useState([]);
   const [matchedPairs, setMatchedPairs] = useState([]);
   const [unmatchedBank, setUnmatchedBank] = useState([]);
   const [unmatchedSystem, setUnmatchedSystem] = useState([]);
@@ -72,6 +74,12 @@ export default function Reconciliation({ currentLedger }) {
     setCategories(cats);
     const defaultAcc = accs.find((a) => a.is_default) || accs[0];
     if (defaultAcc) setSelectedAccount(defaultAcc.id);
+    const defaultExp = cats.find((c) => c.type === 'expense' && c.is_default)
+      || cats.find((c) => c.type === 'expense');
+    if (defaultExp) setExpenseCategoryId(defaultExp.id);
+    const defaultInc = cats.find((c) => c.type === 'income' && c.is_default)
+      || cats.find((c) => c.type === 'income');
+    if (defaultInc) setIncomeCategoryId(defaultInc.id);
   };
 
   useEffect(() => { fetchRefData(); }, [currentLedger]);
@@ -114,31 +122,51 @@ export default function Reconciliation({ currentLedger }) {
       message.error('请选择账户');
       return;
     }
-    if (!selectedCategory) {
-      message.error('请选择分类');
+    if (!expenseCategoryId) {
+      message.error('请选择支出分类');
+      return;
+    }
+    if (!incomeCategoryId) {
+      message.error('请选择收入分类');
       return;
     }
 
+    const selectedRecords = unmatchedBank.filter((r) => selectedBankRows.includes(r.row_index));
+    const hasExpense = selectedRecords.some((r) => r.type === 'expense');
+    const hasIncome = selectedRecords.some((r) => r.type === 'income');
+
     Modal.confirm({
       title: '确认导入',
-      content: `将导入 ${selectedBankRows.length} 条记录为新交易，使用数据库事务保证原子性，失败将全部回滚。是否继续？`,
+      content: (
+        <div>
+          <p>将导入 <Text strong>{selectedBankRows.length}</Text> 条记录为新交易：</p>
+          <ul>
+            {hasExpense && (
+              <li>支出记录：使用支出分类（支出分类ID: {expenseCategoryId}）</li>
+            )}
+            {hasIncome && (
+              <li>收入记录：使用收入分类（收入分类ID: {incomeCategoryId}）</li>
+            )}
+          </ul>
+          <p>使用数据库事务保证原子性，失败将全部回滚。是否继续？</p>
+        </div>
+      ),
       icon: <ExclamationCircleOutlined />,
       onOk: async () => {
         setImporting(true);
         try {
-          const records = unmatchedBank
-            .filter((r) => selectedBankRows.includes(r.row_index))
-            .map((r) => ({
-              date: r.date,
-              amount: r.amount,
-              type: r.type,
-              description: r.description,
-            }));
+          const records = selectedRecords.map((r) => ({
+            date: r.date,
+            amount: r.amount,
+            type: r.type,
+            description: r.description,
+          }));
 
           const result = await reconciliationApi.import({
             ledger_id: currentLedger.id,
             account_id: selectedAccount,
-            category_id: selectedCategory,
+            expense_category_id: expenseCategoryId,
+            income_category_id: incomeCategoryId,
             records,
           });
 
@@ -161,7 +189,48 @@ export default function Reconciliation({ currentLedger }) {
 
   const handleManualMatch = () => {
     if (!selectedBank || !selectedSystem) {
-      message.warning('请先从左右两侧各选择一条记录');
+      if (selectedBankForManual.length === 0 || selectedSystemForManual.length === 0) {
+        message.warning('请先从左右两侧选择要配对的记录');
+        return;
+      }
+      if (selectedBankForManual.length !== selectedSystemForManual.length) {
+        message.warning(
+          `批量配对数量不一致：银行记录 ${selectedBankForManual.length} 条，系统交易 ${selectedSystemForManual.length} 条`
+        );
+        return;
+      }
+      const sortedBank = [...selectedBankForManual].sort((a, b) => {
+        const ra = unmatchedBank.find((r) => r.row_index === a);
+        const rb = unmatchedBank.find((r) => r.row_index === b);
+        return (ra?.amount || 0) - (rb?.amount || 0);
+      });
+      const sortedSys = [...selectedSystemForManual].sort((a, b) => {
+        const sa = unmatchedSystem.find((t) => t.id === a);
+        const sb = unmatchedSystem.find((t) => t.id === b);
+        return (sa?.amount || 0) - (sb?.amount || 0);
+      });
+      const newPairs = sortedBank.map((bankIdx, i) => {
+        const bank = unmatchedBank.find((r) => r.row_index === bankIdx);
+        const sys = unmatchedSystem.find((t) => t.id === sortedSys[i]);
+        return {
+          bank_record: bank,
+          system_transaction: sys,
+          score: 0.0,
+          amount_diff: Math.abs(bank.amount - sys.amount) >= 0.001,
+          date_diff: 0,
+          manual: true,
+        };
+      });
+      setMatchedPairs([...matchedPairs, ...newPairs]);
+      setUnmatchedBank(
+        unmatchedBank.filter((r) => !selectedBankForManual.includes(r.row_index))
+      );
+      setUnmatchedSystem(
+        unmatchedSystem.filter((t) => !selectedSystemForManual.includes(t.id))
+      );
+      setSelectedBankForManual([]);
+      setSelectedSystemForManual([]);
+      message.success(`批量手动匹配成功：${newPairs.length} 对`);
       return;
     }
     const newPair = {
@@ -370,7 +439,7 @@ export default function Reconciliation({ currentLedger }) {
     return (
       <div>
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={8}>
             <Card>
               <Statistic
                 title="选择默认账户"
@@ -392,32 +461,45 @@ export default function Reconciliation({ currentLedger }) {
               />
             </Card>
           </Col>
-          <Col span={12}>
+          <Col span={8}>
             <Card>
               <Statistic
-                title="选择默认分类"
+                title="默认支出分类"
                 valueRender={() => (
                   <Select
                     style={{ width: '100%', marginTop: 12 }}
-                    placeholder="请选择导入时使用的分类"
-                    value={selectedCategory}
-                    onChange={setSelectedCategory}
+                    placeholder="请选择支出分类"
+                    value={expenseCategoryId}
+                    onChange={setExpenseCategoryId}
                     showSearch
                   >
-                    <OptGroup label="支出分类">
-                      {expenseCategories.map((c) => (
-                        <Option key={c.id} value={c.id}>
-                          {c.name}
-                        </Option>
-                      ))}
-                    </OptGroup>
-                    <OptGroup label="收入分类">
-                      {incomeCategories.map((c) => (
-                        <Option key={c.id} value={c.id}>
-                          {c.name}
-                        </Option>
-                      ))}
-                    </OptGroup>
+                    {expenseCategories.map((c) => (
+                      <Option key={c.id} value={c.id}>
+                        {c.name}
+                      </Option>
+                    ))}
+                  </Select>
+                )}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card>
+              <Statistic
+                title="默认收入分类"
+                valueRender={() => (
+                  <Select
+                    style={{ width: '100%', marginTop: 12 }}
+                    placeholder="请选择收入分类"
+                    value={incomeCategoryId}
+                    onChange={setIncomeCategoryId}
+                    showSearch
+                  >
+                    {incomeCategories.map((c) => (
+                      <Option key={c.id} value={c.id}>
+                        {c.name}
+                      </Option>
+                    ))}
                   </Select>
                 )}
               />
@@ -562,7 +644,7 @@ export default function Reconciliation({ currentLedger }) {
       {activeTab === 'unmatched' && (
         <div>
           <Card style={{ marginBottom: 16 }}>
-            <Space>
+            <Space wrap>
               <Button
                 type={manualMode ? 'primary' : 'default'}
                 icon={<LinkOutlined />}
@@ -570,23 +652,46 @@ export default function Reconciliation({ currentLedger }) {
                   setManualMode(!manualMode);
                   setSelectedBank(null);
                   setSelectedSystem(null);
+                  setSelectedBankForManual([]);
+                  setSelectedSystemForManual([]);
                 }}
               >
                 {manualMode ? '退出手动匹配模式' : '手动匹配模式'}
               </Button>
               {manualMode && (
-                <Button
-                  type="primary"
-                  disabled={!selectedBank || !selectedSystem}
-                  onClick={handleManualMatch}
-                >
-                  确认配对
-                </Button>
+                <>
+                  <Button
+                    type="primary"
+                    disabled={
+                      (!selectedBank || !selectedSystem)
+                      && (selectedBankForManual.length === 0 || selectedSystemForManual.length === 0)
+                    }
+                    onClick={handleManualMatch}
+                  >
+                    确认配对
+                    {selectedBankForManual.length > 0 && (
+                      <span style={{ marginLeft: 4 }}>
+                        ({selectedBankForManual.length}/{selectedSystemForManual.length})
+                      </span>
+                    )}
+                  </Button>
+                  {selectedBankForManual.length > 0 && (
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setSelectedBankForManual([]);
+                        setSelectedSystemForManual([]);
+                      }}
+                    >
+                      清空批量选择
+                    </Button>
+                  )}
+                </>
               )}
               <Divider type="vertical" />
               <Select
-                style={{ width: 200 }}
-                placeholder="选择默认账户"
+                style={{ width: 180 }}
+                placeholder="默认账户"
                 value={selectedAccount}
                 onChange={setSelectedAccount}
               >
@@ -597,25 +702,28 @@ export default function Reconciliation({ currentLedger }) {
                 ))}
               </Select>
               <Select
-                style={{ width: 200 }}
-                placeholder="选择默认分类"
-                value={selectedCategory}
-                onChange={setSelectedCategory}
+                style={{ width: 180 }}
+                placeholder="支出分类"
+                value={expenseCategoryId}
+                onChange={setExpenseCategoryId}
               >
-                <OptGroup label="支出分类">
-                  {expenseCategories.map((c) => (
-                    <Option key={c.id} value={c.id}>
-                      {c.name}
-                    </Option>
-                  ))}
-                </OptGroup>
-                <OptGroup label="收入分类">
-                  {incomeCategories.map((c) => (
-                    <Option key={c.id} value={c.id}>
-                      {c.name}
-                    </Option>
-                  ))}
-                </OptGroup>
+                {expenseCategories.map((c) => (
+                  <Option key={c.id} value={c.id}>
+                    {c.name}
+                  </Option>
+                ))}
+              </Select>
+              <Select
+                style={{ width: 180 }}
+                placeholder="收入分类"
+                value={incomeCategoryId}
+                onChange={setIncomeCategoryId}
+              >
+                {incomeCategories.map((c) => (
+                  <Option key={c.id} value={c.id}>
+                    {c.name}
+                  </Option>
+                ))}
               </Select>
               <Button
                 type="primary"
@@ -629,7 +737,7 @@ export default function Reconciliation({ currentLedger }) {
             </Space>
             {manualMode && (
               <div style={{ marginTop: 12, color: '#1677ff' }}>
-                <LinkOutlined /> 请从左右两侧各选择一条记录，然后点击"确认配对"
+                <LinkOutlined /> 单选：点击行各选一条进行配对，或勾选左侧复选框批量配对（按金额排序一一对应）
               </div>
             )}
           </Card>
@@ -644,7 +752,25 @@ export default function Reconciliation({ currentLedger }) {
                   </Space>
                 }
                 extra={
-                  !manualMode && (
+                  manualMode ? (
+                    <Space>
+                      <Checkbox
+                        checked={
+                          selectedBankForManual.length === unmatchedBank.length
+                          && unmatchedBank.length > 0
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedBankForManual(unmatchedBank.map((r) => r.row_index));
+                          } else {
+                            setSelectedBankForManual([]);
+                          }
+                        }}
+                      >
+                        全选批量
+                      </Checkbox>
+                    </Space>
+                  ) : (
                     <Checkbox
                       checked={selectedBankRows.length === unmatchedBank.length && unmatchedBank.length > 0}
                       onChange={(e) => {
@@ -662,12 +788,18 @@ export default function Reconciliation({ currentLedger }) {
               >
                 <Table
                   rowSelection={
-                    !manualMode
+                    manualMode
                       ? {
+                          selectedRowKeys: selectedBankForManual,
+                          onChange: (keys) => {
+                            setSelectedBankForManual(keys);
+                            setSelectedBank(null);
+                          },
+                        }
+                      : {
                           selectedRowKeys: selectedBankRows,
                           onChange: (keys) => setSelectedBankRows(keys),
                         }
-                      : undefined
                   }
                   columns={bankColumns}
                   dataSource={unmatchedBank}
@@ -692,8 +824,38 @@ export default function Reconciliation({ currentLedger }) {
                     <span>系统交易 ({unmatchedSystem.length})</span>
                   </Space>
                 }
+                extra={
+                  manualMode && (
+                    <Checkbox
+                      checked={
+                        selectedSystemForManual.length === unmatchedSystem.length
+                        && unmatchedSystem.length > 0
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedSystemForManual(unmatchedSystem.map((t) => t.id));
+                        } else {
+                          setSelectedSystemForManual([]);
+                        }
+                      }}
+                    >
+                      全选批量
+                    </Checkbox>
+                  )
+                }
               >
                 <Table
+                  rowSelection={
+                    manualMode
+                      ? {
+                          selectedRowKeys: selectedSystemForManual,
+                          onChange: (keys) => {
+                            setSelectedSystemForManual(keys);
+                            setSelectedSystem(null);
+                          },
+                        }
+                      : undefined
+                  }
                   columns={systemColumns}
                   dataSource={unmatchedSystem}
                   rowKey="id"
@@ -722,6 +884,8 @@ export default function Reconciliation({ currentLedger }) {
             setUnmatchedBank([]);
             setUnmatchedSystem([]);
             setSelectedBankRows([]);
+            setSelectedBankForManual([]);
+            setSelectedSystemForManual([]);
           }}>
             重新上传
           </Button>

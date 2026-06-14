@@ -457,7 +457,8 @@ class ReconciliationImportItem(BaseModel):
 class ReconciliationImportRequest(BaseModel):
     ledger_id: int
     account_id: int
-    category_id: int
+    expense_category_id: int
+    income_category_id: int
     records: List[ReconciliationImportItem]
 
 
