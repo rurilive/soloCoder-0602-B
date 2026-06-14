@@ -29,23 +29,25 @@ def monthly_summary(
     db: Session = Depends(get_db),
 ):
     start, end = _month_range(year, month)
-    rows = (
-        db.query(Transaction.type, func.sum(Transaction.amount), func.count())
-        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
-        .group_by(Transaction.type)
-        .all()
-    )
-    total_income = 0.0
-    total_expense = 0.0
-    count = 0
-    for r in rows:
-        count += r[2]
-        if r[0] == "income":
-            total_income = float(r[1] or 0)
-        elif r[0] == "expense":
-            total_expense = float(r[1] or 0)
+    count = db.query(func.count(Transaction.id)).filter(
+        Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end
+    ).scalar() or 0
 
-    if target_currency:
+    if not target_currency:
+        rows = (
+            db.query(Transaction.type, func.sum(Transaction.amount), func.count())
+            .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+            .group_by(Transaction.type)
+            .all()
+        )
+        total_income = 0.0
+        total_expense = 0.0
+        for r in rows:
+            if r[0] == "income":
+                total_income = float(r[1] or 0)
+            elif r[0] == "expense":
+                total_expense = float(r[1] or 0)
+    else:
         ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
         base_currency = ledger.base_currency if ledger else "CNY"
 
@@ -133,10 +135,11 @@ def category_stats(
 
     tx_rows = (
         db.query(Transaction.category_id, Transaction.amount, Transaction.date, Transaction.account_id)
+        .join(Category, Transaction.category_id == Category.id)
         .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
     )
     if type:
-        tx_rows = tx_rows.filter(Transaction.type == type)
+        tx_rows = tx_rows.filter(Category.type == type)
     tx_rows = tx_rows.all()
 
     account_ids = list(set(r.account_id for r in tx_rows))
