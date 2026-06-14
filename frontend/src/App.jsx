@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Layout, Menu, Select, Typography, ConfigProvider, theme } from 'antd';
-import { DashboardOutlined, UnorderedListOutlined, TagsOutlined, BarChartOutlined, BookOutlined, ScheduleOutlined, WalletOutlined, AccountBookOutlined } from '@ant-design/icons';
+import { DashboardOutlined, UnorderedListOutlined, TagsOutlined, BarChartOutlined, BookOutlined, ScheduleOutlined, WalletOutlined, AccountBookOutlined, BankOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
@@ -10,6 +10,7 @@ import Ledgers from './pages/Ledgers';
 import Recurring from './pages/Recurring';
 import BudgetManagement from './pages/BudgetManagement';
 import Accounts from './pages/Accounts';
+import Reconciliation from './pages/Reconciliation';
 import { ledgerApi } from './services/api';
 
 const { Header, Sider, Content } = Layout;
@@ -18,6 +19,7 @@ const { Title } = Typography;
 const menuItems = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
   { key: 'transactions', icon: <UnorderedListOutlined />, label: '收支记录' },
+  { key: 'reconciliation', icon: <BankOutlined />, label: '银行对账' },
   { key: 'accounts', icon: <AccountBookOutlined />, label: '账户管理' },
   { key: 'categories', icon: <TagsOutlined />, label: '分类管理' },
   { key: 'report', icon: <BarChartOutlined />, label: '月度报表' },
@@ -63,6 +65,7 @@ function App() {
     switch (page) {
       case 'dashboard': return <Dashboard currentLedger={currentLedger} />;
       case 'transactions': return <Transactions currentLedger={currentLedger} />;
+      case 'reconciliation': return <Reconciliation currentLedger={currentLedger} />;
       case 'accounts': return <Accounts currentLedger={currentLedger} />;
       case 'categories': return <Categories currentLedger={currentLedger} />;
       case 'report': return <MonthlyReport currentLedger={currentLedger} />;

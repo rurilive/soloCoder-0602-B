@@ -148,3 +148,28 @@ export const exchangeRateApi = {
     return request(`/exchange-rates/convert?${params.toString()}`);
   },
 };
+
+async function uploadRequest(url, formData) {
+  const res = await fetch(BASE + url, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '请求失败');
+  }
+  return res.json();
+}
+
+export const reconciliationApi = {
+  upload: (file, ledgerId) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('ledger_id', String(ledgerId));
+    return uploadRequest('/reconciliation/upload', formData);
+  },
+  import: (data) => request('/reconciliation/import', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+};

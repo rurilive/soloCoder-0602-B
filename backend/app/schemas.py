@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 class LedgerCreate(BaseModel):
@@ -406,7 +406,75 @@ class BudgetAlertsResponse(BaseModel):
     alerts: List[BudgetAlertItem]
 
 
+class BankRecord(BaseModel):
+    row_index: int
+    date: Optional[str] = None
+    amount: float
+    type: str
+    description: str
+    raw_data: Dict
+
+
+class SystemTransactionShort(BaseModel):
+    id: int
+    amount: float
+    date: str
+    type: str
+    description: str
+    category_id: int
+    account_id: int
+
+
+class MatchedPair(BaseModel):
+    bank_record: BankRecord
+    system_transaction: SystemTransactionShort
+    score: float
+    amount_diff: bool
+    date_diff: Optional[int] = None
+
+
+class ReconciliationUploadResponse(BaseModel):
+    encoding: str
+    delimiter: str
+    total_bank_records: int
+    total_system_transactions: int
+    matched_count: int
+    unmatched_bank_count: int
+    unmatched_system_count: int
+    bank_records: List[BankRecord]
+    matched_pairs: List[MatchedPair]
+    unmatched_bank: List[BankRecord]
+    unmatched_system: List[SystemTransactionShort]
+
+
+class ReconciliationImportItem(BaseModel):
+    date: str
+    amount: float
+    type: str
+    description: str
+
+
+class ReconciliationImportRequest(BaseModel):
+    ledger_id: int
+    account_id: int
+    category_id: int
+    records: List[ReconciliationImportItem]
+
+
+class ReconciliationImportResult(BaseModel):
+    imported_count: int
+    skipped_count: int
+    transactions: List[TransactionOut]
+
+
 BudgetProgressItem.model_rebuild()
 BudgetProgressSummary.model_rebuild()
 BudgetSuggestionItem.model_rebuild()
 BudgetSuggestionResponse.model_rebuild()
+BankRecord.model_rebuild()
+SystemTransactionShort.model_rebuild()
+MatchedPair.model_rebuild()
+ReconciliationUploadResponse.model_rebuild()
+ReconciliationImportItem.model_rebuild()
+ReconciliationImportRequest.model_rebuild()
+ReconciliationImportResult.model_rebuild()
