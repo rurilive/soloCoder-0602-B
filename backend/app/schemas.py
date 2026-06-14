@@ -199,3 +199,39 @@ class GenerateResult(BaseModel):
     generated_count: int
     skipped_count: int
     details: List[str]
+
+
+class BudgetSuggestionItem(BaseModel):
+    category_id: int
+    category_name: str
+    category_icon: str
+    suggested_amount: float
+    months_available: int
+    has_existing_budget: bool
+
+
+class BudgetSuggestionResponse(BaseModel):
+    ledger_id: int
+    year: int
+    month: int
+    total_months_analyzed: int
+    suggestions: List[BudgetSuggestionItem]
+
+
+class BudgetBatchCreateItem(BaseModel):
+    category_id: int
+    amount: float
+
+
+class BudgetBatchCreateRequest(BaseModel):
+    ledger_id: int
+    year: int
+    month: int
+    items: List[BudgetBatchCreateItem]
+
+
+class BudgetBatchCreateResult(BaseModel):
+    created_count: int
+    skipped_count: int
+    created: List[BudgetOut]
+    skipped: List[int]

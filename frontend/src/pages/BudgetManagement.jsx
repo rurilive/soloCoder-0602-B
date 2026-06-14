@@ -28,6 +28,7 @@ import {
   DollarOutlined,
   ExclamationCircleOutlined,
   SettingOutlined,
+  BulbOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { budgetApi, categoryApi } from '../services/api';
@@ -55,6 +56,12 @@ export default function BudgetManagement({ currentLedger }) {
   const [editItem, setEditItem] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(dayjs());
   const [form] = Form.useForm();
+
+  const [suggestModalOpen, setSuggestModalOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
 
   const year = selectedMonth.year();
   const month = selectedMonth.month() + 1;
@@ -128,6 +135,77 @@ export default function BudgetManagement({ currentLedger }) {
     message.success('预算删除成功');
     fetchProgress();
     fetchBudgets();
+  };
+
+  const handleSuggest = async () => {
+    if (!currentLedger) return;
+    setSuggestLoading(true);
+    try {
+      const data = await budgetApi.suggest({
+        ledger_id: currentLedger.id,
+        year,
+        month,
+      });
+      setSuggestions(data.suggestions);
+      const defaultSelected = data.suggestions
+        .filter((s) => !s.has_existing_budget && s.suggested_amount > 0)
+        .map((s) => s.category_id);
+      setSelectedCategoryIds(defaultSelected);
+      setSuggestModalOpen(true);
+    } catch (err) {
+      message.error(err.message || '获取建议失败');
+    } finally {
+      setSuggestLoading(false);
+    }
+  };
+
+  const handleSuggestConfirm = async () => {
+    if (selectedCategoryIds.length === 0) {
+      message.warning('请至少选择一个分类');
+      return;
+    }
+    const items = suggestions
+      .filter((s) => selectedCategoryIds.includes(s.category_id))
+      .map((s) => ({
+        category_id: s.category_id,
+        amount: s.suggested_amount,
+      }));
+    setConfirmLoading(true);
+    try {
+      const result = await budgetApi.batchCreate({
+        ledger_id: currentLedger.id,
+        year,
+        month,
+        items,
+      });
+      message.success(`成功创建 ${result.created_count} 条预算${result.skipped_count > 0 ? `，跳过 ${result.skipped_count} 条已有预算` : ''}`);
+      setSuggestModalOpen(false);
+      fetchProgress();
+      fetchBudgets();
+    } catch (err) {
+      message.error(err.message || '批量创建失败');
+    } finally {
+      setConfirmLoading(false);
+    }
+  };
+
+  const toggleCategory = (categoryId) => {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId)
+        ? prev.filter((id) => id !== categoryId)
+        : [...prev, categoryId]
+    );
+  };
+
+  const selectAll = () => {
+    const allIds = suggestions
+      .filter((s) => !s.has_existing_budget)
+      .map((s) => s.category_id);
+    setSelectedCategoryIds(allIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedCategoryIds([]);
   };
 
   const openCreate = () => {
@@ -262,6 +340,9 @@ export default function BudgetManagement({ currentLedger }) {
         />
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           新建预算
+        </Button>
+        <Button icon={<BulbOutlined />} onClick={handleSuggest}>
+          智能建议
         </Button>
         <Button icon={<ReloadOutlined />} onClick={fetchProgress}>
           刷新
@@ -406,6 +487,86 @@ export default function BudgetManagement({ currentLedger }) {
             <InputNumber style={{ width: '100%' }} min={0.01} step={100} prefix="¥" precision={2} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={
+          <Space>
+            <BulbOutlined style={{ color: '#faad14' }} />
+            <span>智能预算建议</span>
+          </Space>
+        }
+        open={suggestModalOpen}
+        onOk={handleSuggestConfirm}
+        onCancel={() => setSuggestModalOpen(false)}
+        okText="确认创建"
+        cancelText="取消"
+        width={600}
+        confirmLoading={confirmLoading}
+      >
+        <Spin spinning={suggestLoading}>
+          {suggestions.length > 0 ? (
+            <>
+              <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
+                根据近 <Tag color="blue">{suggestions[0]?.months_available || 0} 个月</Tag> 的支出数据，为您推荐以下预算额度：
+              </div>
+              <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+                <Button size="small" onClick={selectAll}>全选可创建</Button>
+                <Button size="small" onClick={clearSelection}>清空</Button>
+                <span style={{ color: '#999', fontSize: 12, lineHeight: '24px' }}>
+                  已选 {selectedCategoryIds.length} 项
+                </span>
+              </div>
+              <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: 8 }}>
+                <Space direction="vertical" style={{ width: '100%' }} size="small">
+                  {suggestions.map((s) => {
+                    const isSelected = selectedCategoryIds.includes(s.category_id);
+                    const isDisabled = s.has_existing_budget;
+                    return (
+                      <div
+                        key={s.category_id}
+                        onClick={() => !isDisabled && toggleCategory(s.category_id)}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '10px 12px',
+                          borderRadius: 6,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          background: isSelected ? '#e6f4ff' : '#fafafa',
+                          border: `1px solid ${isSelected ? '#91caff' : '#f0f0f0'}`,
+                          opacity: isDisabled ? 0.5 : 1,
+                        }}
+                      >
+                        <Space>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={isDisabled}
+                            onChange={() => {}}
+                            style={{ cursor: isDisabled ? 'not-allowed' : 'pointer' }}
+                          />
+                          <span style={{ fontWeight: 500 }}>{s.category_name}</span>
+                          {isDisabled && <Tag color="default" style={{ marginLeft: 8 }}>已有预算</Tag>}
+                        </Space>
+                        <Space direction="vertical" size={0} style={{ alignItems: 'flex-end' }}>
+                          <span style={{ fontWeight: 600, color: '#1677ff', fontSize: 16 }}>
+                            ¥{s.suggested_amount.toFixed(2)}
+                          </span>
+                          <span style={{ color: '#999', fontSize: 11 }}>
+                            月均 · {s.months_available} 个月数据
+                          </span>
+                        </Space>
+                      </div>
+                    );
+                  })}
+                </Space>
+              </div>
+            </>
+          ) : (
+            <Empty description="暂无建议数据" style={{ padding: 40 }} />
+          )}
+        </Spin>
       </Modal>
     </div>
   );

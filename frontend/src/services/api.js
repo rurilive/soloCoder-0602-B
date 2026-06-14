@@ -64,6 +64,11 @@ export const budgetApi = {
     const qs = new URLSearchParams(params).toString();
     return request(`/budgets/progress?${qs}`);
   },
+  suggest: (params) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/budgets/suggest?${qs}`);
+  },
+  batchCreate: (data) => request('/budgets/batch', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const recurringApi = {

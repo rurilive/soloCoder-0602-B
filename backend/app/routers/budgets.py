@@ -2,15 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
+from datetime import datetime
 
 from app.database import get_db
-from app.models import Budget, Category, Transaction
+from app.models import Budget, Category, Transaction, Ledger
 from app.schemas import (
     BudgetCreate,
     BudgetUpdate,
     BudgetOut,
     BudgetProgressItem,
     BudgetProgressSummary,
+    BudgetSuggestionResponse,
+    BudgetSuggestionItem,
+    BudgetBatchCreateRequest,
+    BudgetBatchCreateResult,
 )
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
@@ -23,6 +28,18 @@ def _month_range(year: int, month: int):
     else:
         end = f"{year:04d}-{month + 1:02d}-01"
     return start, end
+
+
+def _get_previous_months(year: int, month: int, count: int):
+    months = []
+    y, m = year, month
+    for _ in range(count):
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+        months.append((y, m))
+    return months
 
 
 @router.get("/", response_model=List[BudgetOut])
@@ -140,6 +157,209 @@ def budget_progress(
         overbudget_count=overbudget_count,
         unbudgeted_spent=round(unbudgeted_spent, 2),
         items=items,
+    )
+
+
+@router.get("/suggest", response_model=BudgetSuggestionResponse)
+def suggest_budgets(
+    ledger_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
+    if not ledger:
+        raise HTTPException(status_code=404, detail="账本不存在")
+
+    categories = (
+        db.query(Category)
+        .filter(Category.ledger_id == ledger_id, Category.type == "expense")
+        .all()
+    )
+
+    if not categories:
+        return BudgetSuggestionResponse(
+            ledger_id=ledger_id,
+            year=year,
+            month=month,
+            total_months_analyzed=0,
+            suggestions=[],
+        )
+
+    prev_months = _get_previous_months(year, month, 3)
+
+    ledger_created_at = ledger.created_at
+    available_months = []
+    for y, m in prev_months:
+        next_y, next_m = y, m + 1
+        if next_m == 13:
+            next_m = 1
+            next_y += 1
+        month_end = datetime(next_y, next_m, 1)
+        if month_end > ledger_created_at:
+            available_months.append((y, m))
+
+    available_months = list(reversed(available_months))
+
+    if not available_months:
+        suggestions = [
+            BudgetSuggestionItem(
+                category_id=c.id,
+                category_name=c.name,
+                category_icon=c.icon or "",
+                suggested_amount=0.0,
+                months_available=0,
+                has_existing_budget=False,
+            )
+            for c in categories
+        ]
+        return BudgetSuggestionResponse(
+            ledger_id=ledger_id,
+            year=year,
+            month=month,
+            total_months_analyzed=0,
+            suggestions=suggestions,
+        )
+
+    first_month = available_months[0]
+    last_month = available_months[-1]
+    first_start = f"{first_month[0]:04d}-{first_month[1]:02d}-01"
+    last_end_y, last_end_m = last_month
+    if last_end_m == 12:
+        last_end_y += 1
+        last_end_m = 1
+    else:
+        last_end_m += 1
+    last_end = f"{last_end_y:04d}-{last_end_m:02d}-01"
+
+    cat_ids = [c.id for c in categories]
+    rows = (
+        db.query(
+            Transaction.category_id,
+            func.strftime("%Y-%m", Transaction.date).label("month"),
+            func.sum(Transaction.amount).label("total"),
+        )
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.type == "expense",
+            Transaction.category_id.in_(cat_ids),
+            Transaction.date >= first_start,
+            Transaction.date < last_end,
+        )
+        .group_by(Transaction.category_id, "month")
+        .all()
+    )
+
+    cat_month_totals = {}
+    for r in rows:
+        key = (r.category_id, r.month)
+        cat_month_totals[key] = float(r.total or 0)
+
+    total_months = len(available_months)
+
+    existing_budgets = (
+        db.query(Budget)
+        .filter(
+            Budget.ledger_id == ledger_id,
+            Budget.year == year,
+            Budget.month == month,
+        )
+        .all()
+    )
+    existing_cat_ids = {b.category_id for b in existing_budgets}
+
+    suggestions = []
+    for cat in categories:
+        total_spent = 0.0
+        for y, m in available_months:
+            month_key = f"{y:04d}-{m:02d}"
+            key = (cat.id, month_key)
+            if key in cat_month_totals:
+                total_spent += cat_month_totals[key]
+
+        suggested_amount = round(total_spent / total_months, 2) if total_months > 0 else 0.0
+
+        suggestions.append(
+            BudgetSuggestionItem(
+                category_id=cat.id,
+                category_name=cat.name,
+                category_icon=cat.icon or "",
+                suggested_amount=suggested_amount,
+                months_available=total_months,
+                has_existing_budget=cat.id in existing_cat_ids,
+            )
+        )
+
+    return BudgetSuggestionResponse(
+        ledger_id=ledger_id,
+        year=year,
+        month=month,
+        total_months_analyzed=total_months,
+        suggestions=suggestions,
+    )
+
+
+@router.post("/batch", response_model=BudgetBatchCreateResult)
+def batch_create_budgets(
+    data: BudgetBatchCreateRequest,
+    db: Session = Depends(get_db),
+):
+    ledger = db.query(Ledger).filter(Ledger.id == data.ledger_id).first()
+    if not ledger:
+        raise HTTPException(status_code=404, detail="账本不存在")
+
+    existing = (
+        db.query(Budget)
+        .filter(
+            Budget.ledger_id == data.ledger_id,
+            Budget.year == data.year,
+            Budget.month == data.month,
+        )
+        .all()
+    )
+    existing_cat_ids = {b.category_id for b in existing}
+
+    created = []
+    skipped = []
+
+    for item in data.items:
+        if item.category_id in existing_cat_ids:
+            skipped.append(item.category_id)
+            continue
+
+        category = db.query(Category).filter(Category.id == item.category_id).first()
+        if not category:
+            skipped.append(item.category_id)
+            continue
+        if category.ledger_id != data.ledger_id:
+            skipped.append(item.category_id)
+            continue
+        if category.type != "expense":
+            skipped.append(item.category_id)
+            continue
+
+        budget = Budget(
+            category_id=item.category_id,
+            ledger_id=data.ledger_id,
+            amount=item.amount,
+            year=data.year,
+            month=data.month,
+        )
+        db.add(budget)
+        db.flush()
+        db.refresh(budget)
+        created.append(budget)
+
+    db.commit()
+
+    for b in created:
+        db.refresh(b)
+
+    return BudgetBatchCreateResult(
+        created_count=len(created),
+        skipped_count=len(skipped),
+        created=created,
+        skipped=skipped,
     )
 
 
