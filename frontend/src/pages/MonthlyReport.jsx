@@ -31,7 +31,7 @@ export default function MonthlyReport({ currentLedger }) {
         const y = month.year();
         const m = month.month() + 1;
         const params = { ledger_id: currentLedger.id, year: y, month: m };
-        if (displayCurrency && displayCurrency !== baseCurrency) {
+        if (displayCurrency) {
           params.target_currency = displayCurrency;
         }
         const [s, eCats, iCats, txs, accs] = await Promise.all([

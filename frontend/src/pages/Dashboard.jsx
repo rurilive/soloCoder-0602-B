@@ -28,7 +28,7 @@ export default function Dashboard({ currentLedger }) {
       setLoading(true);
       try {
         const params = { ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 };
-        if (displayCurrency && displayCurrency !== baseCurrency) {
+        if (displayCurrency) {
           params.target_currency = displayCurrency;
         }
         const [s, txs, cats, accs] = await Promise.all([

@@ -22,7 +22,7 @@ def _compute_balance(db: Session, account: Account) -> float:
         Transaction.type == "expense",
     ).scalar() or 0
 
-    transfer_in_total = db.query(sql_func.coalesce(sql_func.sum(Transfer.amount), 0)).filter(
+    transfer_in_total = db.query(sql_func.coalesce(sql_func.sum(sql_func.coalesce(Transfer.to_amount, Transfer.amount)), 0)).filter(
         Transfer.to_account_id == account.id,
     ).scalar() or 0
 
