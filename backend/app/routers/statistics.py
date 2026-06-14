@@ -133,11 +133,18 @@ def category_stats(
     tx_rows = (
         db.query(Transaction.category_id, Transaction.amount, Transaction.date, Transaction.account_id)
         .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
-        .all()
     )
+    if type:
+        tx_rows = tx_rows.filter(Transaction.type == type)
+    tx_rows = tx_rows.all()
+
     account_ids = list(set(r.account_id for r in tx_rows))
     accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
     account_currency_map = {a.id: a.currency for a in accounts}
+
+    category_ids = list(set(r.category_id for r in tx_rows))
+    categories = db.query(Category).filter(Category.id.in_(category_ids)).all() if category_ids else []
+    category_map = {c.id: c for c in categories}
 
     category_converted = {}
     for r in tx_rows:
@@ -154,17 +161,20 @@ def category_stats(
 
     total_all = sum(category_converted.values())
     result = []
-    for r in rows:
-        amount = round(category_converted.get(r.category_id, 0.0), 2)
+    for cid, amount in category_converted.items():
+        cat = category_map.get(cid)
+        if not cat:
+            continue
         pct = round(amount / total_all * 100, 2) if total_all > 0 else 0
         result.append(
             CategoryStat(
-                category_id=r.category_id,
-                category_name=r.category_name,
-                category_icon=r.category_icon or "",
-                type=r.cat_type,
-                amount=amount,
+                category_id=cid,
+                category_name=cat.name,
+                category_icon=cat.icon or "",
+                type=cat.type,
+                amount=round(amount, 2),
                 percentage=pct,
             )
         )
+    result.sort(key=lambda x: x.amount, reverse=True)
     return result

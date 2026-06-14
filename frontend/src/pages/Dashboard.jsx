@@ -11,7 +11,7 @@ export default function Dashboard({ currentLedger }) {
   const [recentTx, setRecentTx] = useState([]);
   const [expenseStats, setExpenseStats] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  const [displayCurrency, setDisplayCurrency] = useState(null);
+  const [displayCurrency, setDisplayCurrency] = useState(currentLedger?.base_currency || 'CNY');
 
   const baseCurrency = currentLedger?.base_currency || 'CNY';
 
