@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional
+import re
+from datetime import datetime
 
 from app.database import get_db
 from app.models import Transaction, Ledger, Account, Category
@@ -13,6 +15,24 @@ from app.schemas import (
 from app.utils.reconciliation import parse_csv, match_records
 
 router = APIRouter(prefix="/api/reconciliation", tags=["reconciliation"])
+
+DATE_FORMAT = "%Y-%m-%d"
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_date(value: str, field_name: str):
+    if not DATE_PATTERN.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name}格式错误，应为YYYY-MM-DD",
+        )
+    try:
+        datetime.strptime(value, DATE_FORMAT)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name}不是有效的日期",
+        )
 
 
 def _validate_ledger(db, ledger_id):
@@ -56,6 +76,11 @@ async def upload_bank_statement(
     db: Session = Depends(get_db),
 ):
     _validate_ledger(db, ledger_id)
+
+    if start_date:
+        _validate_date(start_date, "start_date")
+    if end_date:
+        _validate_date(end_date, "end_date")
 
     raw_bytes = await file.read()
     if not raw_bytes:
