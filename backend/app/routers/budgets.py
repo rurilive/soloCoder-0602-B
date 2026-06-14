@@ -183,6 +183,7 @@ def suggest_budgets(
             year=year,
             month=month,
             total_months_analyzed=0,
+            warning="该账本暂无支出分类，请先创建支出分类",
             suggestions=[],
         )
 
@@ -218,6 +219,7 @@ def suggest_budgets(
             year=year,
             month=month,
             total_months_analyzed=0,
+            warning="账本创建不足3个月，暂无历史支出数据用于生成建议",
             suggestions=suggestions,
         )
 
@@ -349,16 +351,29 @@ def batch_create_budgets(
         db.flush()
         db.refresh(budget)
         created.append(budget)
+        existing_cat_ids.add(item.category_id)
 
     db.commit()
 
+    created_out = []
     for b in created:
         db.refresh(b)
+        created_out.append(
+            BudgetOut(
+                id=b.id,
+                category_id=b.category_id,
+                ledger_id=b.ledger_id,
+                amount=b.amount,
+                year=b.year,
+                month=b.month,
+                created_at=b.created_at,
+            )
+        )
 
     return BudgetBatchCreateResult(
-        created_count=len(created),
+        created_count=len(created_out),
         skipped_count=len(skipped),
-        created=created,
+        created=created_out,
         skipped=skipped,
     )
 

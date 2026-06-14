@@ -215,6 +215,7 @@ class BudgetSuggestionResponse(BaseModel):
     year: int
     month: int
     total_months_analyzed: int
+    warning: Optional[str] = None
     suggestions: List[BudgetSuggestionItem]
 
 

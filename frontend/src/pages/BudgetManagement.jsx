@@ -19,6 +19,7 @@ import {
   Spin,
   Divider,
   Tooltip,
+  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -62,6 +63,7 @@ export default function BudgetManagement({ currentLedger }) {
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [suggestWarning, setSuggestWarning] = useState('');
 
   const year = selectedMonth.year();
   const month = selectedMonth.month() + 1;
@@ -140,6 +142,7 @@ export default function BudgetManagement({ currentLedger }) {
   const handleSuggest = async () => {
     if (!currentLedger) return;
     setSuggestLoading(true);
+    setSuggestWarning('');
     try {
       const data = await budgetApi.suggest({
         ledger_id: currentLedger.id,
@@ -147,6 +150,9 @@ export default function BudgetManagement({ currentLedger }) {
         month,
       });
       setSuggestions(data.suggestions);
+      if (data.warning) {
+        setSuggestWarning(data.warning);
+      }
       const defaultSelected = data.suggestions
         .filter((s) => !s.has_existing_budget && s.suggested_amount > 0)
         .map((s) => s.category_id);
@@ -503,15 +509,26 @@ export default function BudgetManagement({ currentLedger }) {
         cancelText="取消"
         width={600}
         confirmLoading={confirmLoading}
+        okButtonProps={{ disabled: selectedCategoryIds.length === 0 }}
       >
         <Spin spinning={suggestLoading}>
+          {suggestWarning && (
+            <Alert
+              message={suggestWarning}
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {suggestions.length > 0 ? (
             <>
               <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
                 根据近 <Tag color="blue">{suggestions[0]?.months_available || 0} 个月</Tag> 的支出数据，为您推荐以下预算额度：
               </div>
               <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
-                <Button size="small" onClick={selectAll}>全选可创建</Button>
+                <Button size="small" onClick={selectAll} disabled={suggestions.filter((s) => !s.has_existing_budget).length === 0}>
+                  全选可创建
+                </Button>
                 <Button size="small" onClick={clearSelection}>清空</Button>
                 <span style={{ color: '#999', fontSize: 12, lineHeight: '24px' }}>
                   已选 {selectedCategoryIds.length} 项
