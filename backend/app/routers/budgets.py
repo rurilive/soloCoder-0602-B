@@ -177,6 +177,17 @@ def suggest_budgets(
         .all()
     )
 
+    existing_budgets = (
+        db.query(Budget)
+        .filter(
+            Budget.ledger_id == ledger_id,
+            Budget.year == year,
+            Budget.month == month,
+        )
+        .all()
+    )
+    existing_cat_ids = {b.category_id for b in existing_budgets}
+
     if not categories:
         return BudgetSuggestionResponse(
             ledger_id=ledger_id,
@@ -210,7 +221,7 @@ def suggest_budgets(
                 category_icon=c.icon or "",
                 suggested_amount=0.0,
                 months_available=0,
-                has_existing_budget=False,
+                has_existing_budget=c.id in existing_cat_ids,
             )
             for c in categories
         ]
@@ -258,17 +269,6 @@ def suggest_budgets(
         cat_month_totals[key] = float(r.total or 0)
 
     total_months = len(available_months)
-
-    existing_budgets = (
-        db.query(Budget)
-        .filter(
-            Budget.ledger_id == ledger_id,
-            Budget.year == year,
-            Budget.month == month,
-        )
-        .all()
-    )
-    existing_cat_ids = {b.category_id for b in existing_budgets}
 
     suggestions = []
     for cat in categories:
