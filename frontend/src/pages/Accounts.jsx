@@ -56,24 +56,9 @@ export default function Accounts({ currentLedger }) {
 
   const handleDelete = async (id) => {
     try {
-      const result = await accountApi.delete(id);
-      if (result.can_delete === false) {
-        Modal.confirm({
-          title: '确认删除',
-          content: result.message + '。删除后关联交易的账户信息将被清除，关联转账记录将被删除。是否继续？',
-          okText: '强制删除',
-          okType: 'danger',
-          cancelText: '取消',
-          onOk: async () => {
-            await accountApi.delete(id, true);
-            message.success('删除成功');
-            fetchData();
-          },
-        });
-      } else {
-        message.success('删除成功');
-        fetchData();
-      }
+      await accountApi.delete(id);
+      message.success('删除成功');
+      fetchData();
     } catch (err) {
       message.error(err.message || '删除失败');
     }

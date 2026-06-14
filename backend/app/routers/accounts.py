@@ -113,11 +113,7 @@ def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(g
 
 
 @router.delete("/{account_id}")
-def delete_account(
-    account_id: int,
-    force: bool = Query(False, description="强制删除，将关联交易的account_id置空并删除关联转账"),
-    db: Session = Depends(get_db),
-):
+def delete_account(account_id: int, db: Session = Depends(get_db)):
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="账户不存在")
@@ -125,22 +121,14 @@ def delete_account(
     tx_count = db.query(Transaction).filter(Transaction.account_id == account_id).count()
     transfer_out_count = db.query(Transfer).filter(Transfer.from_account_id == account_id).count()
     transfer_in_count = db.query(Transfer).filter(Transfer.to_account_id == account_id).count()
+    total_related = tx_count + transfer_out_count + transfer_in_count
 
-    if (tx_count + transfer_out_count + transfer_in_count) > 0 and not force:
-        return {
-            "can_delete": False,
-            "message": f"该账户关联了 {tx_count} 笔交易、{transfer_out_count + transfer_in_count} 笔转账，请确认是否强制删除",
-            "transaction_count": tx_count,
-            "transfer_count": transfer_out_count + transfer_in_count,
-        }
-
-    db.query(Transaction).filter(Transaction.account_id == account_id).update(
-        {"account_id": None}, synchronize_session="fetch"
-    )
-    db.query(Transfer).filter(
-        (Transfer.from_account_id == account_id) | (Transfer.to_account_id == account_id)
-    ).delete(synchronize_session="fetch")
+    if total_related > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无法删除：该账户关联了 {tx_count} 笔交易和 {transfer_out_count + transfer_in_count} 笔转账记录，请先处理关联数据后再删除",
+        )
 
     db.delete(account)
     db.commit()
-    return {"message": "删除成功", "can_delete": True}
+    return {"message": "删除成功"}

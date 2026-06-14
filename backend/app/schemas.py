@@ -150,7 +150,7 @@ class TransactionOut(BaseModel):
     description: str
     category_id: int
     ledger_id: int
-    account_id: Optional[int] = None
+    account_id: int
     date: str
     created_at: datetime
 

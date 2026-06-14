@@ -47,7 +47,7 @@ class Transaction(Base):
     description = Column(Text, default="")
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     date = Column(String(10), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 

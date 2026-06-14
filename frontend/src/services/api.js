@@ -98,7 +98,7 @@ export const accountApi = {
   getBalance: (id) => request(`/accounts/${id}/balance`),
   create: (data) => request('/accounts/', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id, force = false) => request(`/accounts/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+  delete: (id) => request(`/accounts/${id}`, { method: 'DELETE' }),
 };
 
 export const transferApi = {
