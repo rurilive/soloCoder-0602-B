@@ -292,11 +292,16 @@ def suggest_budgets(
             )
         )
 
+    warning_msg = None
+    if total_months < 3:
+        warning_msg = f"仅分析了{total_months}个月数据，建议参考性有限"
+
     return BudgetSuggestionResponse(
         ledger_id=ledger_id,
         year=year,
         month=month,
         total_months_analyzed=total_months,
+        warning=warning_msg,
         suggestions=suggestions,
     )
 
@@ -355,25 +360,13 @@ def batch_create_budgets(
 
     db.commit()
 
-    created_out = []
     for b in created:
         db.refresh(b)
-        created_out.append(
-            BudgetOut(
-                id=b.id,
-                category_id=b.category_id,
-                ledger_id=b.ledger_id,
-                amount=b.amount,
-                year=b.year,
-                month=b.month,
-                created_at=b.created_at,
-            )
-        )
 
     return BudgetBatchCreateResult(
-        created_count=len(created_out),
+        created_count=len(created),
         skipped_count=len(skipped),
-        created=created_out,
+        created=created,
         skipped=skipped,
     )
 

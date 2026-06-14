@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 
 
@@ -16,6 +16,7 @@ class LedgerUpdate(BaseModel):
 
 
 class LedgerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     type: str
@@ -37,6 +38,7 @@ class CategoryUpdate(BaseModel):
 
 
 class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     type: str
@@ -63,6 +65,7 @@ class TransactionUpdate(BaseModel):
 
 
 class TransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     amount: float
     type: str
@@ -121,6 +124,7 @@ class RecurringRuleUpdate(BaseModel):
 
 
 class RecurringRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     frequency: str
@@ -139,6 +143,7 @@ class RecurringRuleOut(BaseModel):
 
 
 class RecurringLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     rule_id: int
     transaction_id: Optional[int]
@@ -161,6 +166,7 @@ class BudgetUpdate(BaseModel):
 
 
 class BudgetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     category_id: int
     ledger_id: int
