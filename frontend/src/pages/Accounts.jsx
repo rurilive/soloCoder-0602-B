@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, Table, message, Statistic } from 'antd';
+import { Card, Row, Col, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, Table, message, Statistic, Switch } from 'antd';
 import { PlusOutlined, SwapOutlined, WalletOutlined, BankOutlined, PayCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { accountApi, transferApi } from '../services/api';
@@ -247,13 +247,10 @@ export default function Accounts({ currentLedger }) {
             </Select>
           </Form.Item>
           <Form.Item name="initial_balance" label="初始余额" rules={[{ required: true }]}>
-            <InputNumber min={0} step={0.01} style={{ width: '100%' }} prefix="¥" />
+            <InputNumber min={0} step={0.01} style={{ width: '100%' }} prefix="¥" disabled={!!editItem} />
           </Form.Item>
           <Form.Item name="is_default" label="设为默认账户" valuePropName="checked">
-            <Select>
-              <Select.Option value={true}>是</Select.Option>
-              <Select.Option value={false}>否</Select.Option>
-            </Select>
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>

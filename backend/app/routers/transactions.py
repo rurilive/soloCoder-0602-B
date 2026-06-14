@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import Transaction, Category
+from app.models import Transaction, Category, Account
 from app.schemas import TransactionCreate, TransactionUpdate, TransactionOut
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -21,6 +21,17 @@ def _validate_category(db, category_id, ledger_id, tx_type):
             detail=f"分类类型不匹配：分类为{cat.type}，交易为{tx_type}",
         )
     return cat
+
+
+def _validate_account(db, account_id, ledger_id):
+    if account_id is None:
+        return None
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=400, detail="账户不存在")
+    if account.ledger_id != ledger_id:
+        raise HTTPException(status_code=400, detail="该账户不属于当前账本")
+    return account
 
 
 def _month_range(year: int, month: int):
@@ -65,6 +76,7 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=TransactionOut)
 def create_transaction(data: TransactionCreate, db: Session = Depends(get_db)):
     _validate_category(db, data.category_id, data.ledger_id, data.type)
+    _validate_account(db, data.account_id, data.ledger_id)
     tx = Transaction(**data.model_dump())
     db.add(tx)
     db.commit()
@@ -85,6 +97,8 @@ def update_transaction(
     final_category = update_dict.get("category_id", tx.category_id)
     if "category_id" in update_dict or "type" in update_dict or "ledger_id" in update_dict:
         _validate_category(db, final_category, final_ledger, final_type)
+    if "account_id" in update_dict or "ledger_id" in update_dict:
+        _validate_account(db, update_dict.get("account_id", tx.account_id), final_ledger)
     for key, value in update_dict.items():
         setattr(tx, key, value)
     db.commit()

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Tag, Space, Popconfirm, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { transactionApi, categoryApi } from '../services/api';
+import { transactionApi, categoryApi, accountApi } from '../services/api';
 
 export default function Transactions({ currentLedger }) {
   const [data, setData] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -17,12 +18,14 @@ export default function Transactions({ currentLedger }) {
     if (!currentLedger) return;
     setLoading(true);
     try {
-      const [txs, cats] = await Promise.all([
+      const [txs, cats, accs] = await Promise.all([
         transactionApi.list({ ledger_id: currentLedger.id, year: filterMonth.year(), month: filterMonth.month() + 1 }),
         categoryApi.list({ ledger_id: currentLedger.id }),
+        accountApi.list({ ledger_id: currentLedger.id }),
       ]);
       setData(txs);
       setCategories(cats);
+      setAccounts(accs);
     } finally {
       setLoading(false);
     }
@@ -61,7 +64,8 @@ export default function Transactions({ currentLedger }) {
   const openCreate = () => {
     setEditItem(null);
     form.resetFields();
-    form.setFieldsValue({ type: 'expense', date: dayjs() });
+    const defaultAcc = accounts.find((a) => a.is_default);
+    form.setFieldsValue({ type: 'expense', date: dayjs(), account_id: defaultAcc?.id });
     setModalOpen(true);
   };
 
@@ -121,6 +125,15 @@ export default function Transactions({ currentLedger }) {
             <Select>
               {(selectedType === 'income' ? incomeCats : expenseCats).map((c) => (
                 <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="account_id" label="账户">
+            <Select allowClear placeholder="请选择账户">
+              {accounts.map((a) => (
+                <Select.Option key={a.id} value={a.id}>
+                  {a.name} (¥{a.balance.toFixed(2)})
+                </Select.Option>
               ))}
             </Select>
           </Form.Item>
