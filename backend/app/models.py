@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -11,6 +11,7 @@ class Ledger(Base):
     name = Column(String(100), nullable=False)
     type = Column(String(50), default="personal")
     description = Column(Text, default="")
+    base_currency = Column(String(3), default="CNY")
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -23,6 +24,7 @@ class Account(Base):
     icon = Column(String(50), default="wallet")
     initial_balance = Column(Float, default=0.0)
     is_default = Column(Boolean, default=False)
+    currency = Column(String(3), default="CNY")
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -59,6 +61,8 @@ class Transfer(Base):
     from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     amount = Column(Float, nullable=False)
+    to_amount = Column(Float, nullable=True)
+    exchange_rate = Column(Float, nullable=True)
     date = Column(String(10), nullable=False)
     note = Column(Text, default="")
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
@@ -108,3 +112,17 @@ class RecurringLog(Base):
     status = Column(String(20), default="success")
     message = Column(Text, default="")
     created_at = Column(DateTime, server_default=func.now())
+
+
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    __table_args__ = (
+        UniqueConstraint("from_currency", "to_currency", "date", name="uq_exchange_rate"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    from_currency = Column(String(3), nullable=False)
+    to_currency = Column(String(3), nullable=False)
+    rate = Column(Float, nullable=False)
+    date = Column(String(10), nullable=False)
+    fetched_at = Column(DateTime, server_default=func.now())

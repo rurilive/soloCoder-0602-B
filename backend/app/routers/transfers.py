@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import Account, Transfer
 from app.schemas import TransferCreate, TransferOut, TransferWithNames
 from app.routers.accounts import _compute_balance
+from app.exchange_rate import convert_amount, SUPPORTED_CURRENCIES
 
 router = APIRouter(prefix="/api/transfers", tags=["transfers"])
 
@@ -25,17 +26,23 @@ def list_transfers(
         account_ids.add(t.from_account_id)
         account_ids.add(t.to_account_id)
     accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
-    account_map = {a.id: a.name for a in accounts}
+    account_map = {a.id: a for a in accounts}
 
     result = []
     for t in transfers:
+        from_acc = account_map.get(t.from_account_id)
+        to_acc = account_map.get(t.to_account_id)
         result.append({
             "id": t.id,
             "from_account_id": t.from_account_id,
             "to_account_id": t.to_account_id,
-            "from_account_name": account_map.get(t.from_account_id, "未知账户"),
-            "to_account_name": account_map.get(t.to_account_id, "未知账户"),
+            "from_account_name": from_acc.name if from_acc else "未知账户",
+            "to_account_name": to_acc.name if to_acc else "未知账户",
+            "from_currency": from_acc.currency if from_acc else "CNY",
+            "to_currency": to_acc.currency if to_acc else "CNY",
             "amount": t.amount,
+            "to_amount": t.to_amount,
+            "exchange_rate": t.exchange_rate,
             "date": t.date,
             "note": t.note,
             "ledger_id": t.ledger_id,
@@ -68,12 +75,42 @@ def create_transfer(data: TransferCreate, db: Session = Depends(get_db)):
 
     current_balance = _compute_balance(db, from_account)
     if current_balance < data.amount:
+        from_sym = SUPPORTED_CURRENCIES.get(from_account.currency, {}).get("symbol", from_account.currency)
         raise HTTPException(
             status_code=400,
-            detail=f"转出账户余额不足，当前余额 ¥{current_balance:.2f}，转账金额 ¥{data.amount:.2f}",
+            detail=f"转出账户余额不足，当前余额 {from_sym}{current_balance:.2f}，转账金额 {from_sym}{data.amount:.2f}",
         )
 
-    transfer = Transfer(**data.model_dump())
+    is_cross_currency = from_account.currency != to_account.currency
+
+    to_amount = None
+    exchange_rate = None
+
+    if is_cross_currency:
+        if data.exchange_rate is not None and data.to_amount is not None:
+            exchange_rate = data.exchange_rate
+            to_amount = data.to_amount
+        elif data.exchange_rate is not None:
+            exchange_rate = data.exchange_rate
+            to_amount = round(data.amount * exchange_rate, 2)
+        else:
+            try:
+                conv, rate, _, _ = convert_amount(db, data.amount, from_account.currency, to_account.currency, data.date)
+                to_amount = conv
+                exchange_rate = rate
+            except ValueError as e:
+                raise HTTPException(status_code=503, detail=f"无法获取汇率进行跨币种转账: {e}")
+
+    transfer = Transfer(
+        from_account_id=data.from_account_id,
+        to_account_id=data.to_account_id,
+        amount=data.amount,
+        to_amount=to_amount,
+        exchange_rate=exchange_rate,
+        date=data.date,
+        note=data.note,
+        ledger_id=data.ledger_id,
+    )
     db.add(transfer)
     db.commit()
     db.refresh(transfer)

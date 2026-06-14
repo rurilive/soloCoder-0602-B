@@ -1,15 +1,25 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Spin } from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, Spin, Select, Space } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, WalletOutlined } from '@ant-design/icons';
 import { Pie } from '@ant-design/charts';
 import dayjs from 'dayjs';
-import { ledgerApi, transactionApi, statisticsApi } from '../services/api';
+import { ledgerApi, transactionApi, statisticsApi, accountApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency } from '../services/api';
 
 export default function Dashboard({ currentLedger }) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState(null);
   const [recentTx, setRecentTx] = useState([]);
   const [expenseStats, setExpenseStats] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [displayCurrency, setDisplayCurrency] = useState(null);
+
+  const baseCurrency = currentLedger?.base_currency || 'CNY';
+
+  useEffect(() => {
+    if (currentLedger) {
+      setDisplayCurrency(currentLedger.base_currency || 'CNY');
+    }
+  }, [currentLedger]);
 
   useEffect(() => {
     if (!currentLedger) return;
@@ -17,22 +27,31 @@ export default function Dashboard({ currentLedger }) {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [s, txs, cats] = await Promise.all([
-          statisticsApi.monthly({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 }),
+        const params = { ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 };
+        if (displayCurrency && displayCurrency !== baseCurrency) {
+          params.target_currency = displayCurrency;
+        }
+        const [s, txs, cats, accs] = await Promise.all([
+          statisticsApi.monthly(params),
           transactionApi.list({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 }),
-          statisticsApi.categories({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1, type: 'expense' }),
+          statisticsApi.categories({ ...params, type: 'expense' }),
+          accountApi.list({ ledger_id: currentLedger.id }),
         ]);
         setSummary(s);
         setRecentTx(txs.slice(0, 5));
         setExpenseStats(cats);
+        setAccounts(accs);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [currentLedger]);
+  }, [currentLedger, displayCurrency]);
 
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 100 }} />;
+
+  const accountMap = {};
+  accounts.forEach((a) => { accountMap[a.id] = a; });
 
   const pieConfig = {
     data: expenseStats.map((s) => ({ name: s.category_name, value: s.amount })),
@@ -52,25 +71,46 @@ export default function Dashboard({ currentLedger }) {
     },
     {
       title: '金额', dataIndex: 'amount', key: 'amount', width: 120, align: 'right',
-      render: (v, r) => (
-        <span style={{ color: r.type === 'income' ? '#3f8600' : '#cf1322' }}>
-          {r.type === 'income' ? '+' : '-'}¥{v.toFixed(2)}
-        </span>
-      ),
+      render: (v, r) => {
+        const acc = accountMap[r.account_id];
+        const cur = acc?.currency || baseCurrency;
+        return (
+          <span style={{ color: r.type === 'income' ? '#3f8600' : '#cf1322' }}>
+            {r.type === 'income' ? '+' : '-'}{formatCurrency(v, cur)}
+          </span>
+        );
+      },
     },
   ];
 
+  const curSym = CURRENCY_SYMBOLS[displayCurrency] || displayCurrency;
+
   return (
     <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <span style={{ color: '#666' }}>显示币种:</span>
+          <Select
+            value={displayCurrency}
+            onChange={setDisplayCurrency}
+            style={{ width: 180 }}
+            options={CURRENCY_OPTIONS}
+          />
+          {displayCurrency !== baseCurrency && (
+            <Tag color="blue">已从{baseCurrency}折算</Tag>
+          )}
+        </Space>
+      </div>
+
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
-          <Card><Statistic title="本月收入" value={summary?.total_income || 0} prefix={<ArrowUpOutlined />} suffix="元" valueStyle={{ color: '#3f8600' }} /></Card>
+          <Card><Statistic title="本月收入" value={summary?.total_income || 0} prefix={<ArrowUpOutlined />} suffix={displayCurrency} valueStyle={{ color: '#3f8600' }} precision={2} /></Card>
         </Col>
         <Col span={8}>
-          <Card><Statistic title="本月支出" value={summary?.total_expense || 0} prefix={<ArrowDownOutlined />} suffix="元" valueStyle={{ color: '#cf1322' }} /></Card>
+          <Card><Statistic title="本月支出" value={summary?.total_expense || 0} prefix={<ArrowDownOutlined />} suffix={displayCurrency} valueStyle={{ color: '#cf1322' }} precision={2} /></Card>
         </Col>
         <Col span={8}>
-          <Card><Statistic title="本月结余" value={summary?.balance || 0} prefix={<WalletOutlined />} suffix="元" valueStyle={{ color: summary?.balance >= 0 ? '#3f8600' : '#cf1322' }} /></Card>
+          <Card><Statistic title="本月结余" value={summary?.balance || 0} prefix={<WalletOutlined />} suffix={displayCurrency} valueStyle={{ color: summary?.balance >= 0 ? '#3f8600' : '#cf1322' }} precision={2} /></Card>
         </Col>
       </Row>
       <Row gutter={16}>

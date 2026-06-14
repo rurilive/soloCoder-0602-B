@@ -4,8 +4,9 @@ from sqlalchemy import func
 from typing import List
 
 from app.database import get_db
-from app.models import Transaction, Category
+from app.models import Transaction, Category, Account, Ledger
 from app.schemas import MonthlySummary, CategoryStat
+from app.exchange_rate import convert_amount
 
 router = APIRouter(prefix="/api/statistics", tags=["statistics"])
 
@@ -24,6 +25,7 @@ def monthly_summary(
     ledger_id: int = Query(...),
     year: int = Query(...),
     month: int = Query(...),
+    target_currency: str = Query(None, description="目标币种，不传则按原币汇总"),
     db: Session = Depends(get_db),
 ):
     start, end = _month_range(year, month)
@@ -42,12 +44,42 @@ def monthly_summary(
             total_income = float(r[1] or 0)
         elif r[0] == "expense":
             total_expense = float(r[1] or 0)
+
+    if target_currency:
+        ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
+        base_currency = ledger.base_currency if ledger else "CNY"
+
+        tx_rows = (
+            db.query(Transaction.type, Transaction.amount, Transaction.date, Transaction.account_id)
+            .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+            .all()
+        )
+        account_ids = list(set(r.account_id for r in tx_rows))
+        accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+        account_currency_map = {a.id: a.currency for a in accounts}
+
+        total_income = 0.0
+        total_expense = 0.0
+        for r in tx_rows:
+            src_currency = account_currency_map.get(r.account_id, base_currency)
+            amount = float(r.amount or 0)
+            if src_currency != target_currency:
+                try:
+                    converted, _, _, _ = convert_amount(db, amount, src_currency, target_currency, r.date)
+                    amount = converted
+                except ValueError:
+                    pass
+            if r.type == "income":
+                total_income += amount
+            elif r.type == "expense":
+                total_expense += amount
+
     return MonthlySummary(
         year=year,
         month=month,
-        total_income=total_income,
-        total_expense=total_expense,
-        balance=total_income - total_expense,
+        total_income=round(total_income, 2),
+        total_expense=round(total_expense, 2),
+        balance=round(total_income - total_expense, 2),
         transaction_count=count,
     )
 
@@ -58,6 +90,7 @@ def category_stats(
     year: int = Query(...),
     month: int = Query(...),
     type: str = Query(None),
+    target_currency: str = Query(None, description="目标币种，不传则按原币汇总"),
     db: Session = Depends(get_db),
 ):
     start, end = _month_range(year, month)
@@ -76,10 +109,53 @@ def category_stats(
         query = query.filter(Category.type == type)
     rows = query.group_by(Transaction.category_id).all()
 
-    total_all = sum(float(r.total or 0) for r in rows)
+    if not target_currency:
+        total_all = sum(float(r.total or 0) for r in rows)
+        result = []
+        for r in rows:
+            amount = float(r.total or 0)
+            pct = round(amount / total_all * 100, 2) if total_all > 0 else 0
+            result.append(
+                CategoryStat(
+                    category_id=r.category_id,
+                    category_name=r.category_name,
+                    category_icon=r.category_icon or "",
+                    type=r.cat_type,
+                    amount=round(amount, 2),
+                    percentage=pct,
+                )
+            )
+        return result
+
+    ledger = db.query(Ledger).filter(Ledger.id == ledger_id).first()
+    base_currency = ledger.base_currency if ledger else "CNY"
+
+    tx_rows = (
+        db.query(Transaction.category_id, Transaction.amount, Transaction.date, Transaction.account_id)
+        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+        .all()
+    )
+    account_ids = list(set(r.account_id for r in tx_rows))
+    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+    account_currency_map = {a.id: a.currency for a in accounts}
+
+    category_converted = {}
+    for r in tx_rows:
+        src_currency = account_currency_map.get(r.account_id, base_currency)
+        amount = float(r.amount or 0)
+        if src_currency != target_currency:
+            try:
+                converted, _, _, _ = convert_amount(db, amount, src_currency, target_currency, r.date)
+                amount = converted
+            except ValueError:
+                pass
+        cid = r.category_id
+        category_converted[cid] = category_converted.get(cid, 0.0) + amount
+
+    total_all = sum(category_converted.values())
     result = []
     for r in rows:
-        amount = float(r.total or 0)
+        amount = round(category_converted.get(r.category_id, 0.0), 2)
         pct = round(amount / total_all * 100, 2) if total_all > 0 else 0
         result.append(
             CategoryStat(

@@ -7,12 +7,14 @@ class LedgerCreate(BaseModel):
     name: str
     type: str = "personal"
     description: str = ""
+    base_currency: str = "CNY"
 
 
 class LedgerUpdate(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     description: Optional[str] = None
+    base_currency: Optional[str] = None
 
 
 class LedgerOut(BaseModel):
@@ -21,6 +23,7 @@ class LedgerOut(BaseModel):
     name: str
     type: str
     description: str
+    base_currency: str
     created_at: datetime
 
 
@@ -30,6 +33,7 @@ class AccountCreate(BaseModel):
     icon: str = "wallet"
     initial_balance: float = 0.0
     is_default: bool = False
+    currency: str = "CNY"
     ledger_id: int
 
 
@@ -39,6 +43,7 @@ class AccountUpdate(BaseModel):
     icon: Optional[str] = None
     initial_balance: Optional[float] = None
     is_default: Optional[bool] = None
+    currency: Optional[str] = None
 
 
 class AccountOut(BaseModel):
@@ -49,6 +54,7 @@ class AccountOut(BaseModel):
     icon: str
     initial_balance: float
     is_default: bool
+    currency: str
     ledger_id: int
     created_at: datetime
 
@@ -61,8 +67,10 @@ class AccountWithBalance(BaseModel):
     icon: str
     initial_balance: float
     is_default: bool
+    currency: str
     ledger_id: int
     balance: float
+    converted_balance: Optional[float] = None
     created_at: datetime
 
 
@@ -70,6 +78,8 @@ class TransferCreate(BaseModel):
     from_account_id: int
     to_account_id: int
     amount: float
+    to_amount: Optional[float] = None
+    exchange_rate: Optional[float] = None
     date: str
     note: str = ""
     ledger_id: int
@@ -81,6 +91,8 @@ class TransferOut(BaseModel):
     from_account_id: int
     to_account_id: int
     amount: float
+    to_amount: Optional[float] = None
+    exchange_rate: Optional[float] = None
     date: str
     note: str
     ledger_id: int
@@ -93,7 +105,11 @@ class TransferWithNames(BaseModel):
     to_account_id: int
     from_account_name: str
     to_account_name: str
+    from_currency: str
+    to_currency: str
     amount: float
+    to_amount: Optional[float] = None
+    exchange_rate: Optional[float] = None
     date: str
     note: str
     ledger_id: int
@@ -324,3 +340,26 @@ class BudgetBatchCreateResult(BaseModel):
     skipped_count: int
     created: List[BudgetOut]
     skipped: List[int]
+
+
+class ExchangeRateOut(BaseModel):
+    from_currency: str
+    to_currency: str
+    rate: float
+    date: str
+
+
+class ExchangeRateConvertResult(BaseModel):
+    from_currency: str
+    to_currency: str
+    original_amount: float
+    converted_amount: float
+    rate: float
+    rate_date: str
+    rate_source: str
+
+
+class CurrencyInfo(BaseModel):
+    code: str
+    name: str
+    symbol: str

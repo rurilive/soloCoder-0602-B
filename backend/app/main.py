@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, SessionLocal, Base
-from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates
 
 
 def seed_db():
@@ -13,19 +13,21 @@ def seed_db():
         db.close()
         return
 
-    personal = Ledger(name="个人账本", type="personal", description="日常个人收支")
-    family = Ledger(name="家庭账本", type="family", description="家庭共同收支")
+    personal = Ledger(name="个人账本", type="personal", description="日常个人收支", base_currency="CNY")
+    family = Ledger(name="家庭账本", type="family", description="家庭共同收支", base_currency="CNY")
     db.add_all([personal, family])
     db.commit()
     db.refresh(personal)
     db.refresh(family)
 
-    cash = Account(name="现金", type="cash", icon="money-collect", initial_balance=2000, is_default=True, ledger_id=personal.id)
-    bank_card = Account(name="银行卡", type="bank", icon="credit-card", initial_balance=50000, ledger_id=personal.id)
-    alipay = Account(name="支付宝", type="ewallet", icon="alipay-circle", initial_balance=8000, ledger_id=personal.id)
-    family_cash = Account(name="家庭现金", type="cash", icon="money-collect", initial_balance=5000, is_default=True, ledger_id=family.id)
-    family_bank = Account(name="家庭银行卡", type="bank", icon="credit-card", initial_balance=100000, ledger_id=family.id)
-    db.add_all([cash, bank_card, alipay, family_cash, family_bank])
+    cash = Account(name="现金", type="cash", icon="money-collect", initial_balance=2000, is_default=True, currency="CNY", ledger_id=personal.id)
+    bank_card = Account(name="银行卡", type="bank", icon="credit-card", initial_balance=50000, currency="CNY", ledger_id=personal.id)
+    alipay = Account(name="支付宝", type="ewallet", icon="alipay-circle", initial_balance=8000, currency="CNY", ledger_id=personal.id)
+    usd_account = Account(name="美元账户", type="bank", icon="bank", initial_balance=5000, currency="USD", ledger_id=personal.id)
+    family_cash = Account(name="家庭现金", type="cash", icon="money-collect", initial_balance=5000, is_default=True, currency="CNY", ledger_id=family.id)
+    family_bank = Account(name="家庭银行卡", type="bank", icon="credit-card", initial_balance=100000, currency="CNY", ledger_id=family.id)
+    family_usd = Account(name="家庭美元储蓄", type="bank", icon="bank", initial_balance=10000, currency="USD", ledger_id=family.id)
+    db.add_all([cash, bank_card, alipay, usd_account, family_cash, family_bank, family_usd])
     db.commit()
 
     cats_personal = [
@@ -57,6 +59,7 @@ def seed_db():
         Transaction(amount=1500, type="expense", description="网购衣服", category_id=6, ledger_id=personal.id, account_id=alipay.id, date="2026-06-06"),
         Transaction(amount=300, type="expense", description="电影聚会", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-08"),
         Transaction(amount=3000, type="expense", description="房租", category_id=8, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-01"),
+        Transaction(amount=500, type="expense", description="美金购物", category_id=6, ledger_id=personal.id, account_id=usd_account.id, date="2026-06-10"),
         Transaction(amount=25000, type="income", description="家庭工资", category_id=9, ledger_id=family.id, account_id=family_bank.id, date="2026-06-01"),
         Transaction(amount=5000, type="income", description="理财收益", category_id=10, ledger_id=family.id, account_id=family_bank.id, date="2026-06-10"),
         Transaction(amount=2000, type="expense", description="家庭餐饮", category_id=11, ledger_id=family.id, account_id=family_cash.id, date="2026-06-02"),
@@ -98,7 +101,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="BookKeeper API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="BookKeeper API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -116,6 +119,7 @@ app.include_router(recurring.router)
 app.include_router(budgets.router)
 app.include_router(accounts.router)
 app.include_router(transfers.router)
+app.include_router(exchange_rates.router)
 
 
 @app.get("/api/health")

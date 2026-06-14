@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, DatePicker, Statistic, Spin } from 'antd';
+import { Card, Row, Col, DatePicker, Statistic, Spin, Select, Space, Tag } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { Column, Pie } from '@ant-design/charts';
 import dayjs from 'dayjs';
-import { statisticsApi, transactionApi } from '../services/api';
+import { statisticsApi, transactionApi, accountApi, CURRENCY_OPTIONS, formatCurrency } from '../services/api';
 
 export default function MonthlyReport({ currentLedger }) {
   const [loading, setLoading] = useState(true);
@@ -12,6 +12,16 @@ export default function MonthlyReport({ currentLedger }) {
   const [expenseStats, setExpenseStats] = useState([]);
   const [incomeStats, setIncomeStats] = useState([]);
   const [dailyData, setDailyData] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [displayCurrency, setDisplayCurrency] = useState(null);
+
+  const baseCurrency = currentLedger?.base_currency || 'CNY';
+
+  useEffect(() => {
+    if (currentLedger) {
+      setDisplayCurrency(currentLedger.base_currency || 'CNY');
+    }
+  }, [currentLedger]);
 
   useEffect(() => {
     if (!currentLedger) return;
@@ -20,15 +30,24 @@ export default function MonthlyReport({ currentLedger }) {
       try {
         const y = month.year();
         const m = month.month() + 1;
-        const [s, eCats, iCats, txs] = await Promise.all([
-          statisticsApi.monthly({ ledger_id: currentLedger.id, year: y, month: m }),
-          statisticsApi.categories({ ledger_id: currentLedger.id, year: y, month: m, type: 'expense' }),
-          statisticsApi.categories({ ledger_id: currentLedger.id, year: y, month: m, type: 'income' }),
+        const params = { ledger_id: currentLedger.id, year: y, month: m };
+        if (displayCurrency && displayCurrency !== baseCurrency) {
+          params.target_currency = displayCurrency;
+        }
+        const [s, eCats, iCats, txs, accs] = await Promise.all([
+          statisticsApi.monthly(params),
+          statisticsApi.categories({ ...params, type: 'expense' }),
+          statisticsApi.categories({ ...params, type: 'income' }),
           transactionApi.list({ ledger_id: currentLedger.id, year: y, month: m }),
+          accountApi.list({ ledger_id: currentLedger.id }),
         ]);
         setSummary(s);
         setExpenseStats(eCats);
         setIncomeStats(iCats);
+        setAccounts(accs);
+
+        const accountMap = {};
+        accs.forEach((a) => { accountMap[a.id] = a; });
 
         const dailyMap = {};
         const daysInMonth = month.daysInMonth();
@@ -48,7 +67,7 @@ export default function MonthlyReport({ currentLedger }) {
       }
     };
     fetchData();
-  }, [currentLedger, month]);
+  }, [currentLedger, month, displayCurrency]);
 
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 100 }} />;
 
@@ -84,18 +103,29 @@ export default function MonthlyReport({ currentLedger }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <DatePicker picker="month" value={month} onChange={setMonth} allowClear={false} />
+      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <DatePicker picker="month" value={month} onChange={setMonth} allowClear={false} />
+          <Select
+            value={displayCurrency}
+            onChange={setDisplayCurrency}
+            style={{ width: 180 }}
+            options={CURRENCY_OPTIONS}
+          />
+          {displayCurrency !== baseCurrency && (
+            <Tag color="blue">已从{baseCurrency}折算</Tag>
+          )}
+        </Space>
       </div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
-          <Card><Statistic title="总收入" value={summary?.total_income || 0} prefix={<ArrowUpOutlined />} suffix="元" valueStyle={{ color: '#3f8600' }} /></Card>
+          <Card><Statistic title="总收入" value={summary?.total_income || 0} prefix={<ArrowUpOutlined />} suffix={displayCurrency} valueStyle={{ color: '#3f8600' }} precision={2} /></Card>
         </Col>
         <Col span={8}>
-          <Card><Statistic title="总支出" value={summary?.total_expense || 0} prefix={<ArrowDownOutlined />} suffix="元" valueStyle={{ color: '#cf1322' }} /></Card>
+          <Card><Statistic title="总支出" value={summary?.total_expense || 0} prefix={<ArrowDownOutlined />} suffix={displayCurrency} valueStyle={{ color: '#cf1322' }} precision={2} /></Card>
         </Col>
         <Col span={8}>
-          <Card><Statistic title="结余" value={summary?.balance || 0} suffix="元" valueStyle={{ color: (summary?.balance || 0) >= 0 ? '#3f8600' : '#cf1322' }} /></Card>
+          <Card><Statistic title="结余" value={summary?.balance || 0} suffix={displayCurrency} valueStyle={{ color: (summary?.balance || 0) >= 0 ? '#3f8600' : '#cf1322' }} precision={2} /></Card>
         </Col>
       </Row>
       <Card title="每日收支趋势" style={{ marginBottom: 24 }}>

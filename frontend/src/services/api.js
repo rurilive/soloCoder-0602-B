@@ -12,6 +12,26 @@ async function request(url, options = {}) {
   return res.json();
 }
 
+export const CURRENCY_SYMBOLS = {
+  CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+  HKD: 'HK$', KRW: '₩', SGD: 'S$', AUD: 'A$', CAD: 'C$',
+};
+
+export const CURRENCY_NAMES = {
+  CNY: '人民币', USD: '美元', EUR: '欧元', GBP: '英镑', JPY: '日元',
+  HKD: '港币', KRW: '韩元', SGD: '新加坡元', AUD: '澳元', CAD: '加元',
+};
+
+export const CURRENCY_OPTIONS = Object.keys(CURRENCY_NAMES).map((code) => ({
+  label: `${CURRENCY_NAMES[code]} (${CURRENCY_SYMBOLS[code]})`,
+  value: code,
+}));
+
+export function formatCurrency(amount, currency = 'CNY') {
+  const sym = CURRENCY_SYMBOLS[currency] || currency;
+  return `${sym}${Number(amount).toFixed(2)}`;
+}
+
 export const ledgerApi = {
   list: () => request('/ledgers/'),
   get: (id) => request(`/ledgers/${id}`),
@@ -42,11 +62,11 @@ export const transactionApi = {
 
 export const statisticsApi = {
   monthly: (params) => {
-    const qs = new URLSearchParams(params).toString();
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
     return request(`/statistics/monthly?${qs}`);
   },
   categories: (params) => {
-    const qs = new URLSearchParams(params).toString();
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
     return request(`/statistics/categories?${qs}`);
   },
 };
@@ -108,4 +128,19 @@ export const transferApi = {
   },
   create: (data) => request('/transfers/', { method: 'POST', body: JSON.stringify(data) }),
   delete: (id) => request(`/transfers/${id}`, { method: 'DELETE' }),
+};
+
+export const exchangeRateApi = {
+  currencies: () => request('/exchange-rates/currencies'),
+  latest: (base = 'CNY') => request(`/exchange-rates/latest?base=${base}`),
+  pair: (from, to, date = null) => {
+    const params = new URLSearchParams({ from, to });
+    if (date) params.set('date', date);
+    return request(`/exchange-rates/pair?${params.toString()}`);
+  },
+  convert: (from, to, amount, date = null) => {
+    const params = new URLSearchParams({ from, to, amount: String(amount) });
+    if (date) params.set('date', date);
+    return request(`/exchange-rates/convert?${params.toString()}`);
+  },
 };

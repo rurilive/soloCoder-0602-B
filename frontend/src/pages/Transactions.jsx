@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Tag, Space, Popconfirm, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { transactionApi, categoryApi, accountApi } from '../services/api';
+import { transactionApi, categoryApi, accountApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency } from '../services/api';
 
 export default function Transactions({ currentLedger }) {
   const [data, setData] = useState([]);
@@ -75,12 +75,16 @@ export default function Transactions({ currentLedger }) {
   const catMap = {};
   categories.forEach((c) => { catMap[c.id] = c.name; });
   const accountMap = {};
-  accounts.forEach((a) => { accountMap[a.id] = a.name; });
+  accounts.forEach((a) => { accountMap[a.id] = a; });
+  const accountCurrencyMap = {};
+  accounts.forEach((a) => { accountCurrencyMap[a.id] = a.currency; });
 
   const defaultAccount = accounts.find((a) => a.is_default) || accounts[0];
 
   const incomeCats = categories.filter((c) => c.type === 'income');
   const expenseCats = categories.filter((c) => c.type === 'expense');
+
+  const selectedAccountId = Form.useWatch('account_id', form);
 
   const columns = [
     { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
@@ -91,16 +95,23 @@ export default function Transactions({ currentLedger }) {
     { title: '分类', dataIndex: 'category_id', key: 'category_id', width: 100, render: (id) => catMap[id] || id },
     {
       title: '账户', dataIndex: 'account_id', key: 'account_id', width: 110,
-      render: (id) => id ? (accountMap[id] || id) : <span style={{ color: '#999' }}>未指定</span>,
+      render: (id) => {
+        const acc = accountMap[id];
+        if (!acc) return id;
+        return <span>{acc.name} <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{acc.currency}</Tag></span>;
+      },
     },
     { title: '描述', dataIndex: 'description', key: 'description' },
     {
       title: '金额', dataIndex: 'amount', key: 'amount', width: 130, align: 'right',
-      render: (v, r) => (
-        <span style={{ color: r.type === 'income' ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
-          {r.type === 'income' ? '+' : '-'}¥{v.toFixed(2)}
-        </span>
-      ),
+      render: (v, r) => {
+        const cur = accountCurrencyMap[r.account_id] || 'CNY';
+        return (
+          <span style={{ color: r.type === 'income' ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
+            {r.type === 'income' ? '+' : '-'}{formatCurrency(v, cur)}
+          </span>
+        );
+      },
     },
     {
       title: '操作', key: 'action', width: 140,
@@ -116,6 +127,8 @@ export default function Transactions({ currentLedger }) {
   ];
 
   const selectedType = Form.useWatch('type', form);
+  const selectedAccountObj = accounts.find((a) => a.id === selectedAccountId);
+  const selectedCurrency = selectedAccountObj?.currency || 'CNY';
 
   return (
     <div>
@@ -143,13 +156,13 @@ export default function Transactions({ currentLedger }) {
             <Select placeholder="请选择账户">
               {accounts.map((a) => (
                 <Select.Option key={a.id} value={a.id}>
-                  {a.name} (¥{a.balance.toFixed(2)})
+                  {a.name} ({a.currency} {formatCurrency(a.balance, a.currency)})
                 </Select.Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="amount" label="金额" rules={[{ required: true }]}>
-            <InputNumber min={0.01} step={0.01} style={{ width: '100%' }} prefix="¥" />
+          <Form.Item name="amount" label={`金额 (${selectedCurrency})`} rules={[{ required: true }]}>
+            <InputNumber min={0.01} step={0.01} style={{ width: '100%' }} prefix={CURRENCY_SYMBOLS[selectedCurrency]} />
           </Form.Item>
           <Form.Item name="date" label="日期" rules={[{ required: true }]}>
             <DatePicker style={{ width: '100%' }} />

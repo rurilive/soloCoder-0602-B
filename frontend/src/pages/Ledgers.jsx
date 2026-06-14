@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { ledgerApi } from '../services/api';
+import { ledgerApi, CURRENCY_OPTIONS, CURRENCY_NAMES, CURRENCY_SYMBOLS } from '../services/api';
 
 export default function Ledgers({ currentLedger, onSwitch }) {
   const [data, setData] = useState([]);
@@ -53,7 +53,7 @@ export default function Ledgers({ currentLedger, onSwitch }) {
   const openCreate = () => {
     setEditItem(null);
     form.resetFields();
-    form.setFieldsValue({ type: 'personal' });
+    form.setFieldsValue({ type: 'personal', base_currency: 'CNY' });
     setModalOpen(true);
   };
 
@@ -66,6 +66,10 @@ export default function Ledgers({ currentLedger, onSwitch }) {
         const colorMap = { personal: 'blue', family: 'green', travel: 'orange' };
         return <Tag color={colorMap[t] || 'default'}>{map[t] || t}</Tag>;
       },
+    },
+    {
+      title: '本位币', dataIndex: 'base_currency', key: 'base_currency', width: 100,
+      render: (c) => <Tag color="purple">{CURRENCY_SYMBOLS[c]} {c}</Tag>,
     },
     { title: '描述', dataIndex: 'description', key: 'description' },
     {
@@ -101,6 +105,9 @@ export default function Ledgers({ currentLedger, onSwitch }) {
               <Select.Option value="family">家庭</Select.Option>
               <Select.Option value="travel">旅行</Select.Option>
             </Select>
+          </Form.Item>
+          <Form.Item name="base_currency" label="本位币" rules={[{ required: true, message: '请选择本位币' }]}>
+            <Select options={CURRENCY_OPTIONS} placeholder="选择本位币" />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input />
