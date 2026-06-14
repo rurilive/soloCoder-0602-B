@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import calendar
 
 from app.database import get_db
-from app.models import RecurringRule, RecurringLog, Transaction, Category
+from app.models import RecurringRule, RecurringLog, Transaction, Category, Account
 from app.schemas import (
     RecurringRuleCreate,
     RecurringRuleUpdate,
@@ -128,6 +128,17 @@ def _validate_category(db, category_id, ledger_id, tx_type):
     return cat
 
 
+def _validate_account(db, account_id, ledger_id):
+    if account_id is None:
+        raise HTTPException(status_code=400, detail="账户不能为空")
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=400, detail="账户不存在")
+    if account.ledger_id != ledger_id:
+        raise HTTPException(status_code=400, detail="该账户不属于当前账本")
+    return account
+
+
 @router.get("/rules/", response_model=List[RecurringRuleOut])
 def list_rules(
     ledger_id: Optional[int] = Query(None),
@@ -155,6 +166,7 @@ def create_rule(data: RecurringRuleCreate, db: Session = Depends(get_db)):
     if data.frequency not in ("monthly", "weekly", "yearly"):
         raise HTTPException(status_code=400, detail="frequency 必须是 monthly/weekly/yearly")
     _validate_category(db, data.category_id, data.ledger_id, data.type)
+    _validate_account(db, data.account_id, data.ledger_id)
     payload = data.model_dump()
     payload["next_date"] = _compute_initial_next(payload)
     rule = RecurringRule(**payload)
@@ -175,6 +187,8 @@ def update_rule(rule_id: int, data: RecurringRuleUpdate, db: Session = Depends(g
     final_category = update_dict.get("category_id", rule.category_id)
     if "category_id" in update_dict or "type" in update_dict or "ledger_id" in update_dict:
         _validate_category(db, final_category, final_ledger, final_type)
+    if "account_id" in update_dict or "ledger_id" in update_dict:
+        _validate_account(db, update_dict.get("account_id", rule.account_id), final_ledger)
     for key, value in update_dict.items():
         setattr(rule, key, value)
     db.commit()
@@ -347,6 +361,7 @@ def generate_transactions(db: Session = Depends(get_db)):
                 description=rule.description or f"[周期]{rule.name}",
                 category_id=rule.category_id,
                 ledger_id=rule.ledger_id,
+                account_id=rule.account_id,
                 date=tx_date_str,
             )
             db.add(tx)

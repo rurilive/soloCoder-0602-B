@@ -88,6 +88,7 @@ class RecurringRule(Base):
     description = Column(Text, default="")
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     start_date = Column(String(10), nullable=False)
     end_date = Column(String(10), default="")
     next_date = Column(String(10), nullable=False)

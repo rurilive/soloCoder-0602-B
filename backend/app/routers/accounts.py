@@ -4,7 +4,7 @@ from sqlalchemy import func as sql_func
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import Account, Transaction, Transfer
+from app.models import Account, Transaction, Transfer, RecurringRule
 from app.schemas import AccountCreate, AccountUpdate, AccountOut, AccountWithBalance
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -121,12 +121,13 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
     tx_count = db.query(Transaction).filter(Transaction.account_id == account_id).count()
     transfer_out_count = db.query(Transfer).filter(Transfer.from_account_id == account_id).count()
     transfer_in_count = db.query(Transfer).filter(Transfer.to_account_id == account_id).count()
-    total_related = tx_count + transfer_out_count + transfer_in_count
+    rule_count = db.query(RecurringRule).filter(RecurringRule.account_id == account_id).count()
+    total_related = tx_count + transfer_out_count + transfer_in_count + rule_count
 
     if total_related > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"无法删除：该账户关联了 {tx_count} 笔交易和 {transfer_out_count + transfer_in_count} 笔转账记录，请先处理关联数据后再删除",
+            detail=f"无法删除：该账户关联了 {tx_count} 笔交易、{transfer_out_count + transfer_in_count} 笔转账和 {rule_count} 条周期记账规则，请先处理关联数据后再删除",
         )
 
     db.delete(account)

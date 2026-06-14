@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, SessionLocal, Base
-from app.models import Ledger, Category, Transaction, Budget, Account, Transfer
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule
 from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers
 
 
@@ -70,6 +70,23 @@ def seed_db():
         Transfer(from_account_id=bank_card.id, to_account_id=alipay.id, amount=3000, date="2026-06-01", note="银行卡转入支付宝", ledger_id=personal.id),
     ]
     db.add_all(sample_transfers)
+    db.commit()
+
+    sample_rules = [
+        RecurringRule(
+            name="每月房租", frequency="monthly", amount=3000, type="expense",
+            description="月度房租支出", category_id=8, ledger_id=personal.id,
+            account_id=bank_card.id, start_date="2026-01-01", next_date="2026-07-01",
+            day_of_month=1,
+        ),
+        RecurringRule(
+            name="每月工资", frequency="monthly", amount=15000, type="income",
+            description="月度工资收入", category_id=1, ledger_id=personal.id,
+            account_id=bank_card.id, start_date="2026-01-01", next_date="2026-07-01",
+            day_of_month=1,
+        ),
+    ]
+    db.add_all(sample_rules)
     db.commit()
     db.close()
 

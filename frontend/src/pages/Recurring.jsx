@@ -28,7 +28,7 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { recurringApi, categoryApi } from '../services/api';
+import { recurringApi, categoryApi, accountApi } from '../services/api';
 
 const frequencyOptions = [
   { value: 'monthly', label: '每月' },
@@ -59,6 +59,7 @@ export default function Recurring({ currentLedger }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [previewDates, setPreviewDates] = useState([]);
   const [form] = Form.useForm();
 
@@ -95,10 +96,19 @@ export default function Recurring({ currentLedger }) {
     setCategories(list);
   };
 
+  const fetchAccounts = async () => {
+    if (!currentLedger) return;
+    const list = await accountApi.list({ ledger_id: currentLedger.id });
+    setAccounts(list);
+  };
+
+  const defaultAccount = accounts.find((a) => a.is_default) || accounts[0];
+
   useEffect(() => {
     fetchRules();
     fetchLogs();
     fetchCategories();
+    fetchAccounts();
   }, [currentLedger]);
 
   useEffect(() => {
@@ -196,6 +206,7 @@ export default function Recurring({ currentLedger }) {
     setEditItem(record);
     form.setFieldsValue({
       ...record,
+      account_id: record.account_id ?? defaultAccount?.id,
       start_date: record.start_date ? dayjs(record.start_date) : null,
       end_date: record.end_date ? dayjs(record.end_date) : null,
     });
@@ -209,6 +220,7 @@ export default function Recurring({ currentLedger }) {
       frequency: 'monthly',
       type: 'expense',
       start_date: dayjs(),
+      account_id: defaultAccount?.id,
     });
     setPreviewDates([]);
     setModalOpen(true);
@@ -263,6 +275,16 @@ export default function Recurring({ currentLedger }) {
       key: 'category_id',
       width: 100,
       render: (id) => categories.find((c) => c.id === id)?.name || '-',
+    },
+    {
+      title: '账户',
+      dataIndex: 'account_id',
+      key: 'account_id',
+      width: 140,
+      render: (id) => {
+        const acc = accounts.find((a) => a.id === id);
+        return acc ? acc.name : '-';
+      },
     },
     { title: '起始日', dataIndex: 'start_date', key: 'start_date', width: 110 },
     { title: '结束日', dataIndex: 'end_date', key: 'end_date', width: 110, render: (v) => v || '-' },
@@ -457,6 +479,24 @@ export default function Recurring({ currentLedger }) {
                     value: c.id,
                   }))}
                   placeholder="请先选择类型"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="account_id"
+                label="账户"
+                rules={[{ required: true, message: '请选择账户' }]}
+              >
+                <Select
+                  options={accounts.map((a) => ({
+                    label: `${a.name} (¥${a.balance.toFixed(2)})`,
+                    value: a.id,
+                  }))}
+                  placeholder="请选择账户"
                 />
               </Form.Item>
             </Col>

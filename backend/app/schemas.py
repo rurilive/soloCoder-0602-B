@@ -181,6 +181,7 @@ class RecurringRuleCreate(BaseModel):
     description: str = ""
     category_id: int
     ledger_id: int
+    account_id: int
     start_date: str
     end_date: str = ""
     day_of_month: Optional[int] = None
@@ -194,6 +195,7 @@ class RecurringRuleUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     category_id: Optional[int] = None
+    account_id: Optional[int] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     next_date: Optional[str] = None
@@ -212,6 +214,7 @@ class RecurringRuleOut(BaseModel):
     description: str
     category_id: int
     ledger_id: int
+    account_id: int
     start_date: str
     end_date: str
     next_date: str
