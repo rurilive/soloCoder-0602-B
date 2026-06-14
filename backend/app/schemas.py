@@ -285,6 +285,7 @@ class BudgetProgressItem(BaseModel):
     remaining_ratio: float
     is_overbudget: bool
     has_budget: bool
+    unconverted_amounts: List["CurrencyAmount"] = []
 
 
 class BudgetProgressSummary(BaseModel):
@@ -296,6 +297,9 @@ class BudgetProgressSummary(BaseModel):
     overbudget_count: int
     unbudgeted_spent: float
     items: List[BudgetProgressItem]
+    base_currency: str
+    conversion_status: str
+    failed_currencies: List[str] = []
 
 
 class GenerateResult(BaseModel):
@@ -312,6 +316,7 @@ class BudgetSuggestionItem(BaseModel):
     suggested_amount: float
     months_available: int
     has_existing_budget: bool
+    unconverted_amounts: List["CurrencyAmount"] = []
 
 
 class BudgetSuggestionResponse(BaseModel):
@@ -321,6 +326,9 @@ class BudgetSuggestionResponse(BaseModel):
     total_months_analyzed: int
     warning: Optional[str] = None
     suggestions: List[BudgetSuggestionItem]
+    base_currency: str
+    conversion_status: str
+    failed_currencies: List[str] = []
 
 
 class BudgetBatchCreateItem(BaseModel):
@@ -359,7 +367,18 @@ class ExchangeRateConvertResult(BaseModel):
     rate_source: str
 
 
+class CurrencyAmount(BaseModel):
+    currency: str
+    amount: float
+
+
 class CurrencyInfo(BaseModel):
     code: str
     name: str
     symbol: str
+
+
+BudgetProgressItem.model_rebuild()
+BudgetProgressSummary.model_rebuild()
+BudgetSuggestionItem.model_rebuild()
+BudgetSuggestionResponse.model_rebuild()

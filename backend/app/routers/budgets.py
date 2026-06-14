@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional, Dict, Tuple
-from datetime import datetime, date
+from typing import List, Optional, Dict, Tuple, Set
+from datetime import datetime
 
 from app.database import get_db
 from app.models import Budget, Category, Transaction, Ledger, Account
-from app.exchange_rate import convert_amount, get_rate
+from app.exchange_rate import get_rate
 from app.schemas import (
     BudgetCreate,
     BudgetUpdate,
@@ -17,6 +17,7 @@ from app.schemas import (
     BudgetSuggestionItem,
     BudgetBatchCreateRequest,
     BudgetBatchCreateResult,
+    CurrencyAmount,
 )
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
@@ -62,11 +63,12 @@ def list_budgets(
 
 def _build_rate_cache(
     db: Session,
-    currencies: set,
+    currencies: Set[str],
     target_currency: str,
     rate_date: str | None = None,
-) -> Dict[Tuple[str, str], float]:
+) -> Tuple[Dict[Tuple[str, str], float], Set[str]]:
     cache: Dict[Tuple[str, str], float] = {}
+    failed: Set[str] = set()
     for cur in currencies:
         if cur == target_currency:
             cache[(cur, target_currency)] = 1.0
@@ -75,8 +77,8 @@ def _build_rate_cache(
             rate, _, _ = get_rate(db, cur, target_currency, rate_date)
             cache[(cur, target_currency)] = rate
         except ValueError:
-            cache[(cur, target_currency)] = 1.0
-    return cache
+            failed.add(cur)
+    return cache, failed
 
 
 @router.get("/progress", response_model=BudgetProgressSummary)
@@ -110,6 +112,9 @@ def budget_progress(
             overbudget_count=0,
             unbudgeted_spent=0,
             items=[],
+            base_currency=base_currency,
+            conversion_status="success",
+            failed_currencies=[],
         )
 
     budgets = (
@@ -122,7 +127,7 @@ def budget_progress(
     accounts = db.query(Account).filter(Account.ledger_id == ledger_id).all()
     account_currency_map = {a.id: a.currency for a in accounts}
     unique_currencies = {a.currency for a in accounts}
-    rate_cache = _build_rate_cache(db, unique_currencies, base_currency, mid_date)
+    rate_cache, failed_currencies = _build_rate_cache(db, unique_currencies, base_currency, mid_date)
 
     all_cat_ids = [c.id for c in all_expense_categories]
     tx_rows = (
@@ -138,12 +143,20 @@ def budget_progress(
     )
 
     spent_map: Dict[int, float] = {}
+    unconverted_map: Dict[int, Dict[str, float]] = {}
     for r in tx_rows:
         cat_id = r.category_id
         acct_currency = account_currency_map.get(r.account_id, base_currency)
-        rate = rate_cache.get((acct_currency, base_currency), 1.0)
-        converted = float(r.amount) * rate
-        spent_map[cat_id] = spent_map.get(cat_id, 0.0) + converted
+        if (acct_currency, base_currency) in rate_cache:
+            rate = rate_cache[(acct_currency, base_currency)]
+            converted = float(r.amount) * rate
+            spent_map[cat_id] = spent_map.get(cat_id, 0.0) + converted
+        else:
+            if cat_id not in unconverted_map:
+                unconverted_map[cat_id] = {}
+            unconverted_map[cat_id][acct_currency] = (
+                unconverted_map[cat_id].get(acct_currency, 0.0) + float(r.amount)
+            )
 
     items = []
     total_budget = 0.0
@@ -160,6 +173,13 @@ def budget_progress(
         remaining_ratio = round(remaining / budget_amount, 4) if budget_amount > 0 else 0.0
         is_overbudget = has_budget and spent > budget_amount
 
+        unconverted_amounts = []
+        if cat.id in unconverted_map:
+            unconverted_amounts = [
+                CurrencyAmount(currency=curr, amount=round(amt, 2))
+                for curr, amt in sorted(unconverted_map[cat.id].items())
+            ]
+
         items.append(
             BudgetProgressItem(
                 budget_id=budget.id if has_budget else None,
@@ -172,6 +192,7 @@ def budget_progress(
                 remaining_ratio=remaining_ratio,
                 is_overbudget=is_overbudget,
                 has_budget=has_budget,
+                unconverted_amounts=unconverted_amounts,
             )
         )
 
@@ -185,6 +206,10 @@ def budget_progress(
 
     total_remaining = round(total_budget - total_spent, 2)
 
+    conversion_status = "success" if not failed_currencies else "partial"
+    if failed_currencies and len(failed_currencies) == len(unique_currencies - {base_currency}):
+        conversion_status = "failed"
+
     return BudgetProgressSummary(
         year=year,
         month=month,
@@ -194,6 +219,9 @@ def budget_progress(
         overbudget_count=overbudget_count,
         unbudgeted_spent=round(unbudgeted_spent, 2),
         items=items,
+        base_currency=base_currency,
+        conversion_status=conversion_status,
+        failed_currencies=sorted(failed_currencies),
     )
 
 
@@ -234,6 +262,9 @@ def suggest_budgets(
             total_months_analyzed=0,
             warning="该账本暂无支出分类，请先创建支出分类",
             suggestions=[],
+            base_currency=base_currency,
+            conversion_status="success",
+            failed_currencies=[],
         )
 
     prev_months = _get_previous_months(year, month, 3)
@@ -270,6 +301,9 @@ def suggest_budgets(
             total_months_analyzed=0,
             warning="账本创建不足3个月，暂无历史支出数据用于生成建议",
             suggestions=suggestions,
+            base_currency=base_currency,
+            conversion_status="success",
+            failed_currencies=[],
         )
 
     first_month = available_months[0]
@@ -288,12 +322,15 @@ def suggest_budgets(
     unique_currencies = {a.currency for a in accounts}
 
     month_rate_caches: Dict[str, Dict[Tuple[str, str], float]] = {}
+    all_failed_currencies: Set[str] = set()
     for y, m in available_months:
         month_key = f"{y:04d}-{m:02d}"
         mid_date = f"{y:04d}-{m:02d}-15"
-        month_rate_caches[month_key] = _build_rate_cache(
+        cache, failed = _build_rate_cache(
             db, unique_currencies, base_currency, mid_date
         )
+        month_rate_caches[month_key] = cache
+        all_failed_currencies.update(failed)
 
     cat_ids = [c.id for c in categories]
     tx_rows = (
@@ -314,15 +351,23 @@ def suggest_budgets(
     )
 
     cat_month_totals: Dict[Tuple[int, str], float] = {}
+    cat_unconverted_totals: Dict[int, Dict[str, float]] = {}
     for r in tx_rows:
         cat_id = r.category_id
         month_key = r.month
         acct_currency = account_currency_map.get(r.account_id, base_currency)
         rate_cache = month_rate_caches.get(month_key, {})
-        rate = rate_cache.get((acct_currency, base_currency), 1.0)
-        converted = float(r.amount) * rate
-        key = (cat_id, month_key)
-        cat_month_totals[key] = cat_month_totals.get(key, 0.0) + converted
+        if (acct_currency, base_currency) in rate_cache:
+            rate = rate_cache[(acct_currency, base_currency)]
+            converted = float(r.amount) * rate
+            key = (cat_id, month_key)
+            cat_month_totals[key] = cat_month_totals.get(key, 0.0) + converted
+        else:
+            if cat_id not in cat_unconverted_totals:
+                cat_unconverted_totals[cat_id] = {}
+            cat_unconverted_totals[cat_id][acct_currency] = (
+                cat_unconverted_totals[cat_id].get(acct_currency, 0.0) + float(r.amount)
+            )
 
     total_months = len(available_months)
 
@@ -337,6 +382,13 @@ def suggest_budgets(
 
         suggested_amount = round(total_spent / total_months, 2) if total_months > 0 else 0.0
 
+        unconverted_amounts = []
+        if cat.id in cat_unconverted_totals:
+            unconverted_amounts = [
+                CurrencyAmount(currency=curr, amount=round(amt / total_months, 2))
+                for curr, amt in sorted(cat_unconverted_totals[cat.id].items())
+            ]
+
         suggestions.append(
             BudgetSuggestionItem(
                 category_id=cat.id,
@@ -345,12 +397,17 @@ def suggest_budgets(
                 suggested_amount=suggested_amount,
                 months_available=total_months,
                 has_existing_budget=cat.id in existing_cat_ids,
+                unconverted_amounts=unconverted_amounts,
             )
         )
 
     warning_msg = None
     if total_months < 3:
         warning_msg = f"仅分析了{total_months}个月数据，建议参考性有限"
+
+    conversion_status = "success" if not all_failed_currencies else "partial"
+    if all_failed_currencies and len(all_failed_currencies) == len(unique_currencies - {base_currency}):
+        conversion_status = "failed"
 
     return BudgetSuggestionResponse(
         ledger_id=ledger_id,
@@ -359,6 +416,9 @@ def suggest_budgets(
         total_months_analyzed=total_months,
         warning=warning_msg,
         suggestions=suggestions,
+        base_currency=base_currency,
+        conversion_status=conversion_status,
+        failed_currencies=sorted(all_failed_currencies),
     )
 
 
