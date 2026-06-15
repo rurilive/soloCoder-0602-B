@@ -154,22 +154,107 @@ def _levenshtein_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
+def _calc_amount_score(amount1: float, amount2: float, max_ratio: float = 0.02, max_abs: float = 5.0) -> float:
+    diff = abs(amount1 - amount2)
+    if diff < 0.001:
+        return 1.0
+    ratio = diff / max(abs(amount1), abs(amount2), 0.001)
+    if ratio <= max_ratio or diff <= max_abs:
+        max_allowed_diff = max(abs(amount1) * max_ratio, abs(amount2) * max_ratio, max_abs)
+        normalized_diff = min(diff / max(max_allowed_diff, 0.001), 1.0)
+        return max(0.0, 1.0 - normalized_diff)
+    return 0.0
+
+
+def _calc_date_score(date1: str, date2: str, max_days: int = 3) -> float:
+    diff = _date_diff_days(date1, date2)
+    if diff is None:
+        return 0.0
+    if diff == 0:
+        return 1.0
+    if diff <= max_days:
+        return 1.0 - (diff / max_days)
+    return 0.0
+
+
+def _calc_desc_score(desc1: str, desc2: str) -> float:
+    sim = _levenshtein_similarity(desc1 or "", desc2 or "")
+    if sim > 0.5:
+        return sim
+    return 0.0
+
+
 def calculate_match_score(bank_record: Dict, system_tx: Transaction) -> float:
-    score = 0.0
+    amount_score = _calc_amount_score(bank_record["amount"], system_tx.amount)
+    date_score = _calc_date_score(bank_record["date"] or "", system_tx.date or "")
+    desc_score = _calc_desc_score(bank_record["description"] or "", system_tx.description or "")
 
-    if abs(bank_record["amount"] - system_tx.amount) < 0.001:
-        score += 0.5
-
-    if bank_record["date"] and system_tx.date:
-        diff = _date_diff_days(bank_record["date"], system_tx.date)
-        if diff is not None and diff <= 3:
-            score += 0.3
-
-    desc_sim = _levenshtein_similarity(bank_record["description"] or "", system_tx.description or "")
-    if desc_sim > 0.5:
-        score += 0.2
-
+    score = amount_score * 0.5 + date_score * 0.3 + desc_score * 0.2
     return round(score, 4)
+
+
+def _find_split_match(
+    bank_rec: Dict,
+    system_txs: List[Transaction],
+    used_tx_ids: set,
+    max_txs: int = 5,
+    max_amount_diff_ratio: float = 0.01,
+) -> Optional[Tuple[float, List[Transaction]]]:
+    bank_amount = bank_rec["amount"]
+    bank_date = bank_rec["date"]
+    bank_type = bank_rec["type"]
+
+    candidates = []
+    for tx in system_txs:
+        if tx.id in used_tx_ids:
+            continue
+        if tx.type != bank_type:
+            continue
+        if tx.amount >= bank_amount:
+            continue
+        if bank_date and tx.date:
+            diff = _date_diff_days(bank_date, tx.date)
+            if diff is not None and diff > 3:
+                continue
+        candidates.append(tx)
+
+    candidates.sort(key=lambda x: x.amount, reverse=True)
+
+    def backtrack(start_idx, current_sum, selected):
+        if len(selected) > max_txs:
+            return None
+        diff = abs(current_sum - bank_amount)
+        max_allowed_diff = max(bank_amount * max_amount_diff_ratio, 0.01)
+        if diff <= max_allowed_diff and len(selected) >= 2:
+            return selected.copy()
+        if current_sum > bank_amount + max_allowed_diff:
+            return None
+        if len(selected) >= max_txs:
+            return None
+        for i in range(start_idx, len(candidates)):
+            tx = candidates[i]
+            selected.append(tx)
+            result = backtrack(i + 1, current_sum + tx.amount, selected)
+            if result is not None:
+                return result
+            selected.pop()
+        return None
+
+    result = backtrack(0, 0.0, [])
+    if not result:
+        return None
+
+    total_amount = sum(t.amount for t in result)
+    amount_score = _calc_amount_score(bank_amount, total_amount, max_ratio=max_amount_diff_ratio, max_abs=0.01)
+
+    date_scores = [_calc_date_score(bank_date or "", t.date or "") for t in result]
+    date_score = sum(date_scores) / len(date_scores) if date_scores else 0.0
+
+    desc_scores = [_calc_desc_score(bank_rec.get("description") or "", t.description or "") for t in result]
+    desc_score = sum(desc_scores) / len(desc_scores) if desc_scores else 0.0
+
+    score = amount_score * 0.4 + date_score * 0.3 + desc_score * 0.3
+    return round(score, 4), result
 
 
 def match_records(bank_records: List[Dict], system_transactions: List[Transaction]) -> Dict:
@@ -177,7 +262,7 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
     used_bank_indices = set()
     matched_pairs = []
 
-    candidates = []
+    single_candidates = []
     for b_idx, bank_rec in enumerate(bank_records):
         for tx in system_transactions:
             if tx.id in used_tx_ids:
@@ -186,29 +271,83 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
                 continue
             s = calculate_match_score(bank_rec, tx)
             if s > 0.7:
-                candidates.append((s, b_idx, tx.id, bank_rec, tx))
+                single_candidates.append((s, b_idx, tx.id, bank_rec, tx, "single"))
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
+    split_candidates = []
+    for b_idx, bank_rec in enumerate(bank_records):
+        result = _find_split_match(bank_rec, system_transactions, used_tx_ids)
+        if result and result[0] > 0.7:
+            score, txs = result
+            split_candidates.append((score, b_idx, [t.id for t in txs], bank_rec, txs, "split"))
 
-    for score, b_idx, tx_id, bank_rec, tx in candidates:
-        if tx_id in used_tx_ids or b_idx in used_bank_indices:
+    all_candidates = single_candidates + split_candidates
+    all_candidates.sort(key=lambda x: x[0], reverse=True)
+
+    for item in all_candidates:
+        score = item[0]
+        b_idx = item[1]
+        tx_ids = item[2]
+        bank_rec = item[3]
+        tx_or_txs = item[4]
+        match_type = item[5]
+
+        if b_idx in used_bank_indices:
             continue
-        matched_pairs.append({
-            "bank_record": bank_rec,
-            "system_transaction": {
-                "id": tx.id,
-                "amount": tx.amount,
-                "date": tx.date,
-                "type": tx.type,
-                "description": tx.description,
-                "category_id": tx.category_id,
-                "account_id": tx.account_id,
-            },
-            "score": score,
-            "amount_diff": abs(bank_rec["amount"] - tx.amount) >= 0.001,
-            "date_diff": _date_diff_days(bank_rec["date"] or "", tx.date or ""),
-        })
-        used_tx_ids.add(tx_id)
+        if isinstance(tx_ids, list):
+            if any(tid in used_tx_ids for tid in tx_ids):
+                continue
+        else:
+            if tx_ids in used_tx_ids:
+                continue
+
+        if match_type == "single":
+            tx = tx_or_txs
+            matched_pairs.append({
+                "match_type": "single",
+                "bank_record": bank_rec,
+                "system_transaction": {
+                    "id": tx.id,
+                    "amount": tx.amount,
+                    "date": tx.date,
+                    "type": tx.type,
+                    "description": tx.description,
+                    "category_id": tx.category_id,
+                    "account_id": tx.account_id,
+                },
+                "system_transactions": None,
+                "score": score,
+                "amount_diff": abs(bank_rec["amount"] - tx.amount) >= 0.001,
+                "date_diff": _date_diff_days(bank_rec["date"] or "", tx.date or ""),
+            })
+            used_tx_ids.add(tx.id)
+        else:
+            txs = tx_or_txs
+            total_amount = sum(t.amount for t in txs)
+            matched_pairs.append({
+                "match_type": "split",
+                "bank_record": bank_rec,
+                "system_transaction": None,
+                "system_transactions": [
+                    {
+                        "id": t.id,
+                        "amount": t.amount,
+                        "date": t.date,
+                        "type": t.type,
+                        "description": t.description,
+                        "category_id": t.category_id,
+                        "account_id": t.account_id,
+                    }
+                    for t in txs
+                ],
+                "score": score,
+                "amount_diff": abs(bank_rec["amount"] - total_amount) >= 0.001,
+                "date_diff": None,
+                "split_count": len(txs),
+                "total_system_amount": total_amount,
+            })
+            for t in txs:
+                used_tx_ids.add(t.id)
+
         used_bank_indices.add(b_idx)
 
     unmatched_bank = [r for i, r in enumerate(bank_records) if i not in used_bank_indices]

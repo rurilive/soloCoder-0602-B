@@ -426,11 +426,15 @@ class SystemTransactionShort(BaseModel):
 
 
 class MatchedPair(BaseModel):
+    match_type: str
     bank_record: BankRecord
-    system_transaction: SystemTransactionShort
+    system_transaction: Optional[SystemTransactionShort] = None
+    system_transactions: Optional[List[SystemTransactionShort]] = None
     score: float
     amount_diff: bool
     date_diff: Optional[int] = None
+    split_count: Optional[int] = None
+    total_system_amount: Optional[float] = None
 
 
 class ReconciliationUploadResponse(BaseModel):
