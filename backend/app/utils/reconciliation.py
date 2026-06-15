@@ -166,30 +166,21 @@ def _calc_amount_score(amount1: float, amount2: float, max_ratio: float = 0.02, 
     return 0.0
 
 
-def _calc_date_score(date1: str, date2: str, max_days: int = 3) -> float:
-    diff = _date_diff_days(date1, date2)
-    if diff is None:
-        return 0.0
-    if diff == 0:
-        return 1.0
-    if diff <= max_days:
-        return 1.0 - (diff / max_days)
-    return 0.0
-
-
-def _calc_desc_score(desc1: str, desc2: str) -> float:
-    sim = _levenshtein_similarity(desc1 or "", desc2 or "")
-    if sim > 0.5:
-        return sim
-    return 0.0
-
-
 def calculate_match_score(bank_record: Dict, system_tx: Transaction) -> float:
-    amount_score = _calc_amount_score(bank_record["amount"], system_tx.amount)
-    date_score = _calc_date_score(bank_record["date"] or "", system_tx.date or "")
-    desc_score = _calc_desc_score(bank_record["description"] or "", system_tx.description or "")
+    score = 0.0
 
-    score = amount_score * 0.5 + date_score * 0.3 + desc_score * 0.2
+    amount_score = _calc_amount_score(bank_record["amount"], system_tx.amount)
+    score += amount_score * 0.5
+
+    if bank_record["date"] and system_tx.date:
+        diff = _date_diff_days(bank_record["date"], system_tx.date)
+        if diff is not None and diff <= 3:
+            score += 0.3
+
+    desc_sim = _levenshtein_similarity(bank_record["description"] or "", system_tx.description or "")
+    if desc_sim > 0.5:
+        score += 0.2
+
     return round(score, 4)
 
 
@@ -214,7 +205,7 @@ def _find_split_match(
             continue
         if bank_date and tx.date:
             diff = _date_diff_days(bank_date, tx.date)
-            if diff is not None and diff > 3:
+            if diff is None or diff != 0:
                 continue
         candidates.append(tx)
 
@@ -247,13 +238,13 @@ def _find_split_match(
     total_amount = sum(t.amount for t in result)
     amount_score = _calc_amount_score(bank_amount, total_amount, max_ratio=max_amount_diff_ratio, max_abs=0.01)
 
-    date_scores = [_calc_date_score(bank_date or "", t.date or "") for t in result]
-    date_score = sum(date_scores) / len(date_scores) if date_scores else 0.0
+    date_score = 0.3 if bank_date else 0.0
 
-    desc_scores = [_calc_desc_score(bank_rec.get("description") or "", t.description or "") for t in result]
-    desc_score = sum(desc_scores) / len(desc_scores) if desc_scores else 0.0
+    desc_sims = [_levenshtein_similarity(bank_rec.get("description") or "", t.description or "") for t in result]
+    avg_desc_sim = sum(desc_sims) / len(desc_sims) if desc_sims else 0.0
+    desc_score = 0.3 if avg_desc_sim > 0.5 else 0.0
 
-    score = amount_score * 0.4 + date_score * 0.3 + desc_score * 0.3
+    score = amount_score * 0.4 + date_score + desc_score
     return round(score, 4), result
 
 

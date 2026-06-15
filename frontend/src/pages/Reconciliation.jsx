@@ -711,7 +711,7 @@ export default function Reconciliation({ currentLedger }) {
               <Text strong>金额模糊匹配</Text>：权重 0.5，差异在 2% 以内或 5 元以内线性衰减
             </li>
             <li>
-              <Text strong>日期 ±3 天内</Text>：权重 0.3，天数差异线性衰减
+              <Text strong>日期 ±3 天内</Text>：权重 0.3
             </li>
             <li>
               <Text strong>描述相似度 &gt; 0.5</Text>：权重 0.2（编辑距离算法）
