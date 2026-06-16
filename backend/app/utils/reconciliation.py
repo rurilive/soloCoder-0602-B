@@ -536,8 +536,17 @@ def confirm_match(
     for pair in matched_pairs:
         new_pair = dict(pair)
         if new_pair["bank_record"]["row_index"] == bank_row_index:
-            if new_pair["confidence"] == "low" and not new_pair["confirmed"]:
-                new_pair["confirmed"] = True
+            if new_pair["confidence"] != "low":
+                return {
+                    "success": False,
+                    "error": "仅低置信度匹配需要确认",
+                }
+            if new_pair["confirmed"]:
+                return {
+                    "success": False,
+                    "error": "该匹配已确认",
+                }
+            new_pair["confirmed"] = True
             return {
                 "success": True,
                 "matched_pairs": new_pairs + [new_pair] + matched_pairs[len(new_pairs) + 1:],
@@ -557,25 +566,28 @@ def reject_match(
     new_pairs = []
     for pair in matched_pairs:
         if pair["bank_record"]["row_index"] == bank_row_index:
-            if pair["confidence"] == "low" and not pair["confirmed"]:
-                new_unmatched_bank = list(unmatched_bank) + [pair["bank_record"]]
-                new_unmatched_system = list(unmatched_system)
-                if pair["match_type"] == "single":
-                    new_unmatched_system.append(pair["system_transaction"])
-                else:
-                    for tx in pair["system_transactions"]:
-                        new_unmatched_system.append(tx)
+            if pair["confidence"] != "low":
                 return {
-                    "success": True,
-                    "matched_pairs": new_pairs + matched_pairs[len(new_pairs) + 1:],
-                    "unmatched_bank": new_unmatched_bank,
-                    "unmatched_system": new_unmatched_system,
+                    "success": False,
+                    "error": "仅低置信度匹配可被拒绝",
                 }
+            if pair["confirmed"]:
+                return {
+                    "success": False,
+                    "error": "已确认的匹配无法拒绝",
+                }
+            new_unmatched_bank = list(unmatched_bank) + [pair["bank_record"]]
+            new_unmatched_system = list(unmatched_system)
+            if pair["match_type"] == "single":
+                new_unmatched_system.append(pair["system_transaction"])
+            else:
+                for tx in pair["system_transactions"]:
+                    new_unmatched_system.append(tx)
             return {
                 "success": True,
-                "matched_pairs": list(matched_pairs),
-                "unmatched_bank": list(unmatched_bank),
-                "unmatched_system": list(unmatched_system),
+                "matched_pairs": new_pairs + matched_pairs[len(new_pairs) + 1:],
+                "unmatched_bank": new_unmatched_bank,
+                "unmatched_system": new_unmatched_system,
             }
         new_pairs.append(pair)
     return {"success": False, "error": "匹配记录未找到"}

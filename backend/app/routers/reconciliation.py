@@ -33,11 +33,12 @@ _session_store: Dict[str, Dict[str, Any]] = {}
 _SESSION_TTL = timedelta(minutes=30)
 
 
-def _cleanup_expired_sessions():
+def _cleanup_expired_sessions(exclude_sid: Optional[str] = None):
     now = datetime.now()
     expired = [
         sid for sid, sess in _session_store.items()
-        if now - sess.get("created_at", now) > _SESSION_TTL
+        if sid != exclude_sid
+        and now - sess.get("created_at", now) > _SESSION_TTL
     ]
     for sid in expired:
         del _session_store[sid]
@@ -217,7 +218,6 @@ def import_unmatched_records(
 
 @router.post("/confirm", response_model=MatchActionResponse)
 def confirm_low_match(data: MatchActionRequest):
-    _cleanup_expired_sessions()
     session = _session_store.get(data.session_id)
     if not session:
         return {
@@ -228,6 +228,8 @@ def confirm_low_match(data: MatchActionRequest):
             "unmatched_system": [],
             "error": "会话不存在或已过期，请重新上传",
         }
+
+    _cleanup_expired_sessions(exclude_sid=data.session_id)
 
     matched_pairs = session["matched_pairs"]
     unmatched_bank = session["unmatched_bank"]
@@ -265,7 +267,6 @@ def confirm_low_match(data: MatchActionRequest):
 
 @router.post("/reject", response_model=MatchActionResponse)
 def reject_low_match(data: MatchActionRequest):
-    _cleanup_expired_sessions()
     session = _session_store.get(data.session_id)
     if not session:
         return {
@@ -276,6 +277,8 @@ def reject_low_match(data: MatchActionRequest):
             "unmatched_system": [],
             "error": "会话不存在或已过期，请重新上传",
         }
+
+    _cleanup_expired_sessions(exclude_sid=data.session_id)
 
     matched_pairs = session["matched_pairs"]
     unmatched_bank = session["unmatched_bank"]
