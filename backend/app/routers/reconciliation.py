@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models import Transaction, Ledger, Account, Category
@@ -29,6 +29,18 @@ DATE_FORMAT = "%Y-%m-%d"
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _session_store: Dict[str, Dict[str, Any]] = {}
+
+_SESSION_TTL = timedelta(minutes=30)
+
+
+def _cleanup_expired_sessions():
+    now = datetime.now()
+    expired = [
+        sid for sid, sess in _session_store.items()
+        if now - sess.get("created_at", now) > _SESSION_TTL
+    ]
+    for sid in expired:
+        del _session_store[sid]
 
 
 def _validate_date(value: str, field_name: str):
@@ -114,6 +126,7 @@ async def upload_bank_statement(
 
     result = match_records(bank_records, system_transactions)
 
+    _cleanup_expired_sessions()
     session_id = str(uuid.uuid4())
     _session_store[session_id] = {
         "matched_pairs": result["matched_pairs"],
@@ -204,6 +217,7 @@ def import_unmatched_records(
 
 @router.post("/confirm", response_model=MatchActionResponse)
 def confirm_low_match(data: MatchActionRequest):
+    _cleanup_expired_sessions()
     session = _session_store.get(data.session_id)
     if not session:
         return {
@@ -251,6 +265,7 @@ def confirm_low_match(data: MatchActionRequest):
 
 @router.post("/reject", response_model=MatchActionResponse)
 def reject_low_match(data: MatchActionRequest):
+    _cleanup_expired_sessions()
     session = _session_store.get(data.session_id)
     if not session:
         return {
