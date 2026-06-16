@@ -502,3 +502,101 @@ ReconciliationImportRequest.model_rebuild()
 ReconciliationImportResult.model_rebuild()
 MatchActionRequest.model_rebuild()
 MatchActionResponse.model_rebuild()
+
+
+class LoanCreate(BaseModel):
+    name: str
+    principal: float
+    annual_rate: float
+    term_months: int
+    amortization_type: str
+    start_date: str
+    repayment_day: int
+    ledger_id: int
+    account_id: int
+    category_id: int
+    description: str = ""
+
+
+class LoanUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
+class LoanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    principal: float
+    annual_rate: float
+    term_months: int
+    amortization_type: str
+    start_date: str
+    repayment_day: int
+    ledger_id: int
+    account_id: int
+    category_id: int
+    status: str
+    total_interest: float
+    total_payment: float
+    description: str
+    created_at: datetime
+
+
+class LoanWithSchedule(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    principal: float
+    annual_rate: float
+    term_months: int
+    amortization_type: str
+    start_date: str
+    repayment_day: int
+    ledger_id: int
+    account_id: int
+    category_id: int
+    status: str
+    total_interest: float
+    total_payment: float
+    description: str
+    created_at: datetime
+    schedule: List["LoanRepaymentScheduleOut"] = []
+
+
+class LoanRepaymentScheduleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    loan_id: int
+    period_number: int
+    due_date: str
+    payment_amount: float
+    principal_amount: float
+    interest_amount: float
+    remaining_principal: float
+    status: str
+    transaction_id: Optional[int] = None
+    is_early_repayment: bool
+    early_repayment_amount: float
+    created_at: datetime
+
+
+class EarlyRepaymentRequest(BaseModel):
+    loan_id: int
+    period_number: int
+    amount: float
+    repayment_type: str = "reduce_term"
+
+
+class LoanRemainingPrincipalPoint(BaseModel):
+    period_number: int
+    due_date: str
+    remaining_principal: float
+
+
+class LoanGenerateTransactionRequest(BaseModel):
+    schedule_id: int
+
+
+LoanWithSchedule.model_rebuild()

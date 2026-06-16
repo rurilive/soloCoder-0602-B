@@ -126,3 +126,42 @@ class ExchangeRate(Base):
     rate = Column(Float, nullable=False)
     date = Column(String(10), nullable=False)
     fetched_at = Column(DateTime, server_default=func.now())
+
+
+class Loan(Base):
+    __tablename__ = "loans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    principal = Column(Float, nullable=False)
+    annual_rate = Column(Float, nullable=False)
+    term_months = Column(Integer, nullable=False)
+    amortization_type = Column(String(20), nullable=False)
+    start_date = Column(String(10), nullable=False)
+    repayment_day = Column(Integer, nullable=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    status = Column(String(20), default="active")
+    total_interest = Column(Float, default=0.0)
+    total_payment = Column(Float, default=0.0)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class LoanRepaymentSchedule(Base):
+    __tablename__ = "loan_repayment_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
+    period_number = Column(Integer, nullable=False)
+    due_date = Column(String(10), nullable=False)
+    payment_amount = Column(Float, nullable=False)
+    principal_amount = Column(Float, nullable=False)
+    interest_amount = Column(Float, nullable=False)
+    remaining_principal = Column(Float, nullable=False)
+    status = Column(String(20), default="pending")
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    is_early_repayment = Column(Boolean, default=False)
+    early_repayment_amount = Column(Float, default=0.0)
+    created_at = Column(DateTime, server_default=func.now())

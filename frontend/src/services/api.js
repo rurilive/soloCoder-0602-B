@@ -189,3 +189,17 @@ export const reconciliationApi = {
     }),
   }),
 };
+
+export const loanApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/loans/${qs ? '?' + qs : ''}`);
+  },
+  get: (id) => request(`/loans/${id}`),
+  create: (data) => request('/loans/', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/loans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => request(`/loans/${id}`, { method: 'DELETE' }),
+  earlyRepayment: (data) => request('/loans/early-repayment', { method: 'POST', body: JSON.stringify(data) }),
+  generateTransaction: (loanId, scheduleId) => request(`/loans/${loanId}/generate-transaction/${scheduleId}`, { method: 'POST' }),
+  getRemainingPrincipal: (id) => request(`/loans/${id}/remaining-principal`),
+};
