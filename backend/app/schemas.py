@@ -432,6 +432,7 @@ class MatchedPair(BaseModel):
     system_transactions: Optional[List[SystemTransactionShort]] = None
     score: float
     confidence: str
+    confirmed: bool = True
     amount_diff: bool
     date_diff: Optional[int] = None
     split_count: Optional[int] = None
@@ -473,6 +474,22 @@ class ReconciliationImportResult(BaseModel):
     transactions: List[TransactionOut]
 
 
+class MatchActionRequest(BaseModel):
+    bank_row_index: int
+    matched_pairs: List[MatchedPair]
+    unmatched_bank: List[BankRecord]
+    unmatched_system: List[SystemTransactionShort]
+
+
+class MatchActionResponse(BaseModel):
+    success: bool
+    matched_count: int
+    matched_pairs: List[MatchedPair]
+    unmatched_bank: List[BankRecord]
+    unmatched_system: List[SystemTransactionShort]
+    error: Optional[str] = None
+
+
 BudgetProgressItem.model_rebuild()
 BudgetProgressSummary.model_rebuild()
 BudgetSuggestionItem.model_rebuild()
@@ -484,3 +501,5 @@ ReconciliationUploadResponse.model_rebuild()
 ReconciliationImportItem.model_rebuild()
 ReconciliationImportRequest.model_rebuild()
 ReconciliationImportResult.model_rebuild()
+MatchActionRequest.model_rebuild()
+MatchActionResponse.model_rebuild()

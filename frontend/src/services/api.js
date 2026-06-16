@@ -174,4 +174,12 @@ export const reconciliationApi = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
+  confirm: (data) => request('/reconciliation/confirm', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  reject: (data) => request('/reconciliation/reject', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
 };

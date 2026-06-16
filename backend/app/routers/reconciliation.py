@@ -11,8 +11,16 @@ from app.schemas import (
     ReconciliationImportRequest,
     ReconciliationImportResult,
     TransactionCreate,
+    MatchActionRequest,
+    MatchActionResponse,
 )
-from app.utils.reconciliation import parse_csv, match_records
+from app.utils.reconciliation import (
+    parse_csv,
+    match_records,
+    count_confirmed_matches,
+    confirm_match,
+    reject_match,
+)
 
 router = APIRouter(prefix="/api/reconciliation", tags=["reconciliation"])
 
@@ -103,12 +111,13 @@ async def upload_bank_statement(
 
     result = match_records(bank_records, system_transactions)
 
+    confirmed_count = count_confirmed_matches(result["matched_pairs"])
     return {
         "encoding": encoding,
         "delimiter": delimiter,
         "total_bank_records": len(bank_records),
         "total_system_transactions": len(system_transactions),
-        "matched_count": len(result["matched_pairs"]),
+        "matched_count": confirmed_count,
         "unmatched_bank_count": len(result["unmatched_bank"]),
         "unmatched_system_count": len(result["unmatched_system"]),
         "bank_records": bank_records,
@@ -178,4 +187,68 @@ def import_unmatched_records(
         "imported_count": len(imported),
         "skipped_count": 0,
         "transactions": imported,
+    }
+
+
+@router.post("/confirm", response_model=MatchActionResponse)
+def confirm_low_match(data: MatchActionRequest):
+    matched_pairs = [p.model_dump() for p in data.matched_pairs]
+    unmatched_bank = [r.model_dump() for r in data.unmatched_bank]
+    unmatched_system = [t.model_dump() for t in data.unmatched_system]
+
+    result = confirm_match(
+        matched_pairs,
+        unmatched_bank,
+        unmatched_system,
+        data.bank_row_index,
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "matched_count": count_confirmed_matches(matched_pairs),
+            "matched_pairs": data.matched_pairs,
+            "unmatched_bank": data.unmatched_bank,
+            "unmatched_system": data.unmatched_system,
+            "error": result.get("error"),
+        }
+
+    return {
+        "success": True,
+        "matched_count": count_confirmed_matches(result["matched_pairs"]),
+        "matched_pairs": result["matched_pairs"],
+        "unmatched_bank": result["unmatched_bank"],
+        "unmatched_system": result["unmatched_system"],
+    }
+
+
+@router.post("/reject", response_model=MatchActionResponse)
+def reject_low_match(data: MatchActionRequest):
+    matched_pairs = [p.model_dump() for p in data.matched_pairs]
+    unmatched_bank = [r.model_dump() for r in data.unmatched_bank]
+    unmatched_system = [t.model_dump() for t in data.unmatched_system]
+
+    result = reject_match(
+        matched_pairs,
+        unmatched_bank,
+        unmatched_system,
+        data.bank_row_index,
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "matched_count": count_confirmed_matches(matched_pairs),
+            "matched_pairs": data.matched_pairs,
+            "unmatched_bank": data.unmatched_bank,
+            "unmatched_system": data.unmatched_system,
+            "error": result.get("error"),
+        }
+
+    return {
+        "success": True,
+        "matched_count": count_confirmed_matches(result["matched_pairs"]),
+        "matched_pairs": result["matched_pairs"],
+        "unmatched_bank": result["unmatched_bank"],
+        "unmatched_system": result["unmatched_system"],
     }

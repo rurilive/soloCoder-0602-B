@@ -292,6 +292,7 @@ export default function Reconciliation({ currentLedger }) {
         system_transactions: null,
         score: 0.0,
         confidence: 'high',
+        confirmed: true,
         amount_diff: Math.abs(selectedBank.amount - selectedSystem.amount) >= 0.001,
         date_diff: 0,
         manual: true,
@@ -336,6 +337,7 @@ export default function Reconciliation({ currentLedger }) {
           system_transactions: sysList,
           score: 0.0,
           confidence: 'high',
+          confirmed: true,
           amount_diff: Math.abs(bank.amount - totalAmount) >= 0.001,
           date_diff: null,
           split_count: sysList.length,
@@ -379,6 +381,7 @@ export default function Reconciliation({ currentLedger }) {
           system_transactions: null,
           score: 0.0,
           confidence: 'high',
+          confirmed: true,
           amount_diff: Math.abs(bank.amount - sys.amount) >= 0.001,
           date_diff: 0,
           manual: true,
@@ -412,6 +415,64 @@ export default function Reconciliation({ currentLedger }) {
     setUnmatchedBank([...unmatchedBank, pair.bank_record]);
     setUnmatchedSystem([...unmatchedSystem, ...sysList]);
     message.info('已取消匹配');
+  };
+
+  const handleConfirmMatch = async (pair) => {
+    if (pair.confirmed) {
+      message.info('该匹配已确认');
+      return;
+    }
+    try {
+      const result = await reconciliationApi.confirm({
+        bank_row_index: pair.bank_record.row_index,
+        matched_pairs: matchedPairs,
+        unmatched_bank: unmatchedBank,
+        unmatched_system: unmatchedSystem,
+      });
+      if (result.success) {
+        setMatchedPairs(result.matched_pairs);
+        setUnmatchedBank(result.unmatched_bank);
+        setUnmatchedSystem(result.unmatched_system);
+        setUploadResult((prev) => ({
+          ...prev,
+          matched_count: result.matched_count,
+        }));
+        message.success('匹配已确认');
+      } else {
+        message.error(result.error || '确认失败');
+      }
+    } catch (e) {
+      message.error(e.message || '确认失败');
+    }
+  };
+
+  const handleRejectMatch = async (pair) => {
+    if (pair.confirmed) {
+      message.info('该匹配已确认，无法拒绝');
+      return;
+    }
+    try {
+      const result = await reconciliationApi.reject({
+        bank_row_index: pair.bank_record.row_index,
+        matched_pairs: matchedPairs,
+        unmatched_bank: unmatchedBank,
+        unmatched_system: unmatchedSystem,
+      });
+      if (result.success) {
+        setMatchedPairs(result.matched_pairs);
+        setUnmatchedBank(result.unmatched_bank);
+        setUnmatchedSystem(result.unmatched_system);
+        setUploadResult((prev) => ({
+          ...prev,
+          matched_count: result.matched_count,
+        }));
+        message.success('已拒绝匹配，记录退回未匹配列表');
+      } else {
+        message.error(result.error || '拒绝失败');
+      }
+    } catch (e) {
+      message.error(e.message || '拒绝失败');
+    }
   };
 
   const handleRowSelect = (type, record) => {
@@ -624,12 +685,34 @@ export default function Reconciliation({ currentLedger }) {
     {
       title: '操作',
       key: 'action',
-      width: 80,
-      render: (_, r) => (
-        <Button type="link" size="small" danger onClick={() => handleUnmatch(r)}>
-          取消匹配
-        </Button>
-      ),
+      width: 180,
+      render: (_, r) => {
+        if (r.confidence === 'low' && !r.confirmed) {
+          return (
+            <Space size={4}>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => handleConfirmMatch(r)}
+              >
+                确认
+              </Button>
+              <Button
+                size="small"
+                danger
+                onClick={() => handleRejectMatch(r)}
+              >
+                拒绝
+              </Button>
+            </Space>
+          );
+        }
+        return (
+          <Button type="link" size="small" danger onClick={() => handleUnmatch(r)}>
+            取消匹配
+          </Button>
+        );
+      },
     },
   ];
 
@@ -799,9 +882,17 @@ export default function Reconciliation({ currentLedger }) {
           <Col span={4}>
             <Statistic
               title="已匹配"
-              value={matchedPairs.length}
+              value={matchedPairs.filter((p) => p.confirmed).length}
               styles={{ content: { color: '#52c41a' } }}
               prefix={<CheckCircleOutlined />}
+            />
+          </Col>
+          <Col span={4}>
+            <Statistic
+              title="待确认"
+              value={matchedPairs.filter((p) => !p.confirmed).length}
+              styles={{ content: { color: '#faad14' } }}
+              prefix={<ExclamationCircleOutlined />}
             />
           </Col>
           <Col span={4}>
@@ -874,7 +965,7 @@ export default function Reconciliation({ currentLedger }) {
         onChange={setActiveTab}
         style={{ marginBottom: 16 }}
         items={[
-          { key: 'matched', label: `已匹配 (${matchedPairs.length})` },
+          { key: 'matched', label: `已匹配 (${matchedPairs.filter((p) => p.confirmed).length})` },
           { key: 'unmatched', label: `未匹配 (${unmatchedBank.length + filteredUnmatchedSystem.length})` },
         ]}
       />

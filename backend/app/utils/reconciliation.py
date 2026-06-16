@@ -423,6 +423,7 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
             score = score_matrix[i][j]
             bank_rec = bank_records[b_idx]
 
+            confidence = _calc_confidence("single", score)
             matched_pairs.append({
                 "match_type": "single",
                 "bank_record": bank_rec,
@@ -437,7 +438,8 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
                 },
                 "system_transactions": None,
                 "score": score,
-                "confidence": _calc_confidence("single", score),
+                "confidence": confidence,
+                "confirmed": confidence != "low",
                 "amount_diff": abs(bank_rec["amount"] - tx.amount) >= 0.001,
                 "date_diff": _date_diff_days(bank_rec["date"] or "", tx.date or ""),
             })
@@ -470,6 +472,7 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
 
         txs = tx_or_txs
         total_amount = sum(t.amount for t in txs)
+        confidence = _calc_confidence("split", score)
         matched_pairs.append({
             "match_type": "split",
             "bank_record": bank_rec,
@@ -487,7 +490,8 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
                 for t in txs
             ],
             "score": score,
-            "confidence": _calc_confidence("split", score),
+            "confidence": confidence,
+            "confirmed": confidence != "low",
             "amount_diff": abs(bank_rec["amount"] - total_amount) >= 0.001,
             "date_diff": None,
             "split_count": len(txs),
@@ -516,3 +520,52 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
         "unmatched_bank": unmatched_bank,
         "unmatched_system": unmatched_system,
     }
+
+
+def count_confirmed_matches(matched_pairs: List[Dict]) -> int:
+    return sum(1 for pair in matched_pairs if pair["confirmed"])
+
+
+def confirm_match(
+    matched_pairs: List[Dict],
+    unmatched_bank: List[Dict],
+    unmatched_system: List[Dict],
+    bank_row_index: int,
+) -> Dict:
+    for pair in matched_pairs:
+        if pair["bank_record"]["row_index"] == bank_row_index:
+            if pair["confidence"] == "low" and not pair["confirmed"]:
+                pair["confirmed"] = True
+            return {
+                "success": True,
+                "matched_pairs": matched_pairs,
+                "unmatched_bank": unmatched_bank,
+                "unmatched_system": unmatched_system,
+            }
+    return {"success": False, "error": "匹配记录未找到"}
+
+
+def reject_match(
+    matched_pairs: List[Dict],
+    unmatched_bank: List[Dict],
+    unmatched_system: List[Dict],
+    bank_row_index: int,
+) -> Dict:
+    for idx, pair in enumerate(matched_pairs):
+        if pair["bank_record"]["row_index"] == bank_row_index:
+            if pair["confidence"] == "low" and not pair["confirmed"]:
+                unmatched_bank.append(pair["bank_record"])
+                if pair["match_type"] == "single":
+                    tx = pair["system_transaction"]
+                    unmatched_system.append(tx)
+                else:
+                    for tx in pair["system_transactions"]:
+                        unmatched_system.append(tx)
+                matched_pairs.pop(idx)
+            return {
+                "success": True,
+                "matched_pairs": matched_pairs,
+                "unmatched_bank": unmatched_bank,
+                "unmatched_system": unmatched_system,
+            }
+    return {"success": False, "error": "匹配记录未找到"}
