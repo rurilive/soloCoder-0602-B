@@ -201,5 +201,6 @@ export const loanApi = {
   delete: (id) => request(`/loans/${id}`, { method: 'DELETE' }),
   earlyRepayment: (data) => request('/loans/early-repayment', { method: 'POST', body: JSON.stringify(data) }),
   generateTransaction: (loanId, scheduleId) => request(`/loans/${loanId}/generate-transaction/${scheduleId}`, { method: 'POST' }),
+  generateOverdueTransactions: (loanId) => request(`/loans/${loanId}/generate-overdue-transactions`, { method: 'POST' }),
   getRemainingPrincipal: (id) => request(`/loans/${id}/remaining-principal`),
 };

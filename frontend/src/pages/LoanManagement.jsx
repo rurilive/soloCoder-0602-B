@@ -29,6 +29,7 @@ import {
   LineChartOutlined,
   CalendarOutlined,
   InfoCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
@@ -217,6 +218,32 @@ export default function LoanManagement({ currentLedger }) {
 
   const getOverdueCount = (schedule) => {
     return schedule.filter((s) => s.status === 'overdue').length;
+  };
+
+  const getDueUnprocessedCount = (schedule) => {
+    const today = dayjs().format('YYYY-MM-DD');
+    return schedule.filter((s) =>
+      (s.status === 'pending' || s.status === 'overdue') &&
+      !s.transaction_id &&
+      s.due_date <= today
+    ).length;
+  };
+
+  const handleGenerateOverdueTransactions = async () => {
+    try {
+      const result = await loanApi.generateOverdueTransactions(selectedLoan.id);
+      if (result.failed_count > 0) {
+        message.warning(`批量生成完成：成功 ${result.success_count} 笔，失败 ${result.failed_count} 笔`);
+        if (result.failed_details && result.failed_details.length > 0) {
+          console.error('失败详情:', result.failed_details);
+        }
+      } else {
+        message.success(`批量生成完成，共生成 ${result.success_count} 笔交易`);
+      }
+      fetchLoanDetail(selectedLoan.id);
+    } catch (e) {
+      message.error('批量生成失败: ' + e.message);
+    }
   };
 
   const loanColumns = [
@@ -463,6 +490,17 @@ export default function LoanManagement({ currentLedger }) {
               >
                 提前还款
               </Button>
+            )}
+            {selectedLoan.status === 'active' && getDueUnprocessedCount(selectedLoan.schedule) > 0 && (
+              <Tooltip title={`将为 ${getDueUnprocessedCount(selectedLoan.schedule)} 笔到期未生成交易的还款计划批量生成支出交易`}>
+                <Button
+                  danger
+                  icon={<ThunderboltOutlined />}
+                  onClick={handleGenerateOverdueTransactions}
+                >
+                  一键生成逾期交易 ({getDueUnprocessedCount(selectedLoan.schedule)})
+                </Button>
+              </Tooltip>
             )}
           </div>
 

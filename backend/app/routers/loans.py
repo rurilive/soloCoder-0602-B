@@ -246,6 +246,7 @@ def early_repayment(data: EarlyRepaymentRequest, db: Session = Depends(get_db)):
         early_repayment_period=data.period_number,
         early_repayment_amount=data.amount,
         amortization_type=loan.amortization_type,
+        annual_rate=loan.annual_rate,
         repayment_type=data.repayment_type,
     )
 
@@ -254,19 +255,34 @@ def early_repayment(data: EarlyRepaymentRequest, db: Session = Depends(get_db)):
 
     for item in new_schedule:
         orig = schedules[item["period_number"] - 1] if item["period_number"] <= len(schedules) else None
-        schedule_item = LoanRepaymentSchedule(
-            loan_id=loan.id,
-            period_number=item["period_number"],
-            due_date=item["due_date"],
-            payment_amount=item["payment_amount"],
-            principal_amount=item["principal_amount"],
-            interest_amount=item["interest_amount"],
-            remaining_principal=item["remaining_principal"],
-            status=orig.status if orig and orig.status == "paid" else item.get("status", "pending"),
-            transaction_id=orig.transaction_id if orig else None,
-            is_early_repayment=item.get("is_early_repayment", False),
-            early_repayment_amount=item.get("early_repayment_amount", 0.0),
-        )
+        if orig and orig.status == "paid":
+            schedule_item = LoanRepaymentSchedule(
+                loan_id=loan.id,
+                period_number=orig.period_number,
+                due_date=orig.due_date,
+                payment_amount=orig.payment_amount,
+                principal_amount=orig.principal_amount,
+                interest_amount=orig.interest_amount,
+                remaining_principal=orig.remaining_principal,
+                status=orig.status,
+                transaction_id=orig.transaction_id,
+                is_early_repayment=orig.is_early_repayment,
+                early_repayment_amount=orig.early_repayment_amount,
+            )
+        else:
+            schedule_item = LoanRepaymentSchedule(
+                loan_id=loan.id,
+                period_number=item["period_number"],
+                due_date=item["due_date"],
+                payment_amount=item["payment_amount"],
+                principal_amount=item["principal_amount"],
+                interest_amount=item["interest_amount"],
+                remaining_principal=item["remaining_principal"],
+                status=item.get("status", "pending"),
+                transaction_id=None,
+                is_early_repayment=item.get("is_early_repayment", False),
+                early_repayment_amount=item.get("early_repayment_amount", 0.0),
+            )
         db.add(schedule_item)
 
     total_interest = sum(item["interest_amount"] for item in new_schedule)
@@ -374,3 +390,71 @@ def get_remaining_principal_curve(loan_id: int, db: Session = Depends(get_db)):
         })
 
     return result
+
+
+@router.post("/{loan_id}/generate-overdue-transactions")
+def generate_overdue_transactions(loan_id: int, db: Session = Depends(get_db)):
+    loan = db.query(Loan).filter(Loan.id == loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="贷款不存在")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    schedules = db.query(LoanRepaymentSchedule).filter(
+        LoanRepaymentSchedule.loan_id == loan_id,
+        LoanRepaymentSchedule.status.in_(["pending", "overdue"]),
+        LoanRepaymentSchedule.transaction_id.is_(None),
+        LoanRepaymentSchedule.due_date <= today,
+    ).order_by(LoanRepaymentSchedule.period_number).all()
+
+    success_count = 0
+    failed_count = 0
+    failed_details = []
+
+    for schedule in schedules:
+        try:
+            total_amount = schedule.payment_amount + schedule.early_repayment_amount
+            description = f"{loan.name} - 第{schedule.period_number}期还款"
+            if schedule.is_early_repayment:
+                description += f"（含提前还款{schedule.early_repayment_amount}）"
+
+            tx = Transaction(
+                amount=total_amount,
+                type="expense",
+                description=description,
+                category_id=loan.category_id,
+                ledger_id=loan.ledger_id,
+                account_id=loan.account_id,
+                date=schedule.due_date,
+            )
+            db.add(tx)
+            db.flush()
+
+            schedule.transaction_id = tx.id
+            schedule.status = "paid"
+            success_count += 1
+        except Exception as e:
+            failed_count += 1
+            failed_details.append({
+                "period_number": schedule.period_number,
+                "error": str(e),
+            })
+
+    if success_count > 0:
+        db.commit()
+
+    all_schedules = db.query(LoanRepaymentSchedule).filter(
+        LoanRepaymentSchedule.loan_id == loan_id
+    ).all()
+    all_paid = all(s.status == "paid" for s in all_schedules)
+    if all_paid:
+        loan.status = "paid_off"
+        db.commit()
+
+    return {
+        "message": "批量生成完成",
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "failed_details": failed_details,
+        "total_processed": len(schedules),
+    }

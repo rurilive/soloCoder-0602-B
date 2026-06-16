@@ -104,9 +104,19 @@ def recalculate_schedule_after_early_repayment(
     early_repayment_period: int,
     early_repayment_amount: float,
     amortization_type: str,
+    annual_rate: float,
     repayment_type: str = "reduce_term",
 ) -> List[Dict]:
-    paid_schedule = original_schedule[:early_repayment_period - 1]
+    paid_schedule = []
+    for item in original_schedule[:early_repayment_period - 1]:
+        paid_schedule.append({
+            **item,
+            "principal_amount": item["principal_amount"],
+            "interest_amount": item["interest_amount"],
+            "payment_amount": item["payment_amount"],
+            "remaining_principal": item["remaining_principal"],
+        })
+
     target_period = original_schedule[early_repayment_period - 1]
 
     remaining_principal = target_period["remaining_principal"] - early_repayment_amount
@@ -132,7 +142,7 @@ def recalculate_schedule_after_early_repayment(
     if amortization_type == "equal_principal":
         new_schedule, _, _ = calculate_equal_principal(
             principal=remaining_principal,
-            annual_rate=0,
+            annual_rate=annual_rate,
             term_months=remaining_periods,
             start_date=start_date,
             repayment_day=repayment_day,
@@ -140,7 +150,7 @@ def recalculate_schedule_after_early_repayment(
     else:
         new_schedule, _, _ = calculate_equal_payment(
             principal=remaining_principal,
-            annual_rate=0,
+            annual_rate=annual_rate,
             term_months=remaining_periods,
             start_date=start_date,
             repayment_day=repayment_day,
