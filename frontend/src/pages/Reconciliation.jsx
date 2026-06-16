@@ -18,6 +18,7 @@ import {
   Divider,
   Tooltip,
   DatePicker,
+  Collapse,
 } from 'antd';
 import {
   UploadOutlined,
@@ -75,6 +76,37 @@ export default function Reconciliation({ currentLedger }) {
     const end = dateRange[1].format('YYYY-MM-DD');
     return unmatchedSystem.filter((t) => t.date >= start && t.date <= end);
   }, [unmatchedSystem, dateRange]);
+
+  const matchedGroups = useMemo(() => {
+    const groups = { high: [], medium: [], low: [] };
+    matchedPairs.forEach((pair) => {
+      const conf = pair.confidence || 'low';
+      if (groups[conf]) {
+        groups[conf].push(pair);
+      } else {
+        groups.low.push(pair);
+      }
+    });
+    return groups;
+  }, [matchedPairs]);
+
+  const getConfidenceLabel = (conf) => {
+    switch (conf) {
+      case 'high': return '高置信度';
+      case 'medium': return '中置信度';
+      case 'low': return '低置信度（需确认）';
+      default: return conf;
+    }
+  };
+
+  const getConfidenceColor = (conf) => {
+    switch (conf) {
+      case 'high': return 'green';
+      case 'medium': return 'orange';
+      case 'low': return 'red';
+      default: return 'default';
+    }
+  };
 
   useEffect(() => {
     if (selectedSystemForManual.length === 0) return;
@@ -259,6 +291,7 @@ export default function Reconciliation({ currentLedger }) {
         system_transaction: selectedSystem,
         system_transactions: null,
         score: 0.0,
+        confidence: 'high',
         amount_diff: Math.abs(selectedBank.amount - selectedSystem.amount) >= 0.001,
         date_diff: 0,
         manual: true,
@@ -302,6 +335,7 @@ export default function Reconciliation({ currentLedger }) {
           system_transaction: null,
           system_transactions: sysList,
           score: 0.0,
+          confidence: 'high',
           amount_diff: Math.abs(bank.amount - totalAmount) >= 0.001,
           date_diff: null,
           split_count: sysList.length,
@@ -344,6 +378,7 @@ export default function Reconciliation({ currentLedger }) {
           system_transaction: sys,
           system_transactions: null,
           score: 0.0,
+          confidence: 'high',
           amount_diff: Math.abs(bank.amount - sys.amount) >= 0.001,
           date_diff: 0,
           manual: true,
@@ -472,10 +507,24 @@ export default function Reconciliation({ currentLedger }) {
 
   const matchedColumns = [
     {
+      title: '置信度',
+      dataIndex: 'confidence',
+      key: 'confidence',
+      width: 100,
+      render: (v, r) => {
+        const conf = r.manual ? 'high' : (v || 'low');
+        return (
+          <Tag color={getConfidenceColor(conf)}>
+            {getConfidenceLabel(conf)}
+          </Tag>
+        );
+      },
+    },
+    {
       title: '匹配得分',
       dataIndex: 'score',
       key: 'score',
-      width: 110,
+      width: 90,
       render: (v, r) => (
         <Space direction="vertical" size={2}>
           {r.manual ? (
@@ -832,69 +881,95 @@ export default function Reconciliation({ currentLedger }) {
 
       {activeTab === 'matched' && (
         <Card>
-          <Table
-            columns={matchedColumns}
-            dataSource={matchedPairs}
-            rowKey={(r) => `pair-${r.bank_record.row_index}`}
-            rowClassName={(r) => r.amount_diff ? 'diff-amount' : ''}
-            expandable={{
-              expandedRowRender: (r) => (
-                <div style={{ paddingLeft: 70 }}>
-                  {r.match_type === 'split' && (
-                    <div style={{ marginBottom: 12 }}>
-                      <Text strong style={{ color: '#722ed1' }}>
-                        拆分匹配明细（共 {r.split_count} 笔系统交易）
-                      </Text>
-                      <Table
-                        size="small"
-                        columns={[
-                          { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
-                          {
-                            title: '类型',
-                            dataIndex: 'type',
-                            key: 'type',
-                            width: 70,
-                            render: (t) => (
-                              <Tag color={t === 'income' ? 'green' : 'red'}>
-                                {t === 'income' ? '收入' : '支出'}
-                              </Tag>
-                            ),
-                          },
-                          {
-                            title: '金额',
-                            dataIndex: 'amount',
-                            key: 'amount',
-                            width: 120,
-                            align: 'right',
-                            render: (v, row) => (
-                              <span
-                                style={{
-                                  color: row.type === 'income' ? '#3f8600' : '#cf1322',
-                                  fontWeight: 'bold',
-                                }}
-                              >
-                                {row.type === 'income' ? '+' : '-'}
-                                {formatCurrency(v)}
-                              </span>
-                            ),
-                          },
-                          { title: '描述', dataIndex: 'description', key: 'description' },
-                        ]}
-                        dataSource={r.system_transactions}
-                        rowKey="id"
-                        pagination={false}
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <Text type="secondary">银行原始数据：</Text>
-                    <pre style={{ background: '#fafafa', padding: 8, borderRadius: 4, marginTop: 4 }}>
-                      {JSON.stringify(r.bank_record.raw_data, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              ),
-            }}
+          <Collapse
+            defaultActiveKey={['high', 'medium']}
+            items={['high', 'medium', 'low']
+              .filter((conf) => (matchedGroups[conf] || []).length > 0)
+              .map((conf) => {
+                const pairs = matchedGroups[conf] || [];
+                return {
+                  key: conf,
+                  label: (
+                    <Space>
+                      <Tag color={getConfidenceColor(conf)}>
+                        {getConfidenceLabel(conf)}
+                      </Tag>
+                      <Text type="secondary">{pairs.length} 条匹配</Text>
+                      {conf === 'low' && (
+                        <Tag color="red" style={{ marginLeft: 8 }}>
+                          需手动确认
+                        </Tag>
+                      )}
+                    </Space>
+                  ),
+                  children: (
+                    <Table
+                      columns={matchedColumns}
+                      dataSource={pairs}
+                      rowKey={(r) => `pair-${r.bank_record.row_index}`}
+                      rowClassName={(r) => r.amount_diff ? 'diff-amount' : ''}
+                      expandable={{
+                        expandedRowRender: (r) => (
+                          <div style={{ paddingLeft: 70 }}>
+                            {r.match_type === 'split' && (
+                              <div style={{ marginBottom: 12 }}>
+                                <Text strong style={{ color: '#722ed1' }}>
+                                  拆分匹配明细（共 {r.split_count} 笔系统交易）
+                                </Text>
+                                <Table
+                                  size="small"
+                                  columns={[
+                                    { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
+                                    {
+                                      title: '类型',
+                                      dataIndex: 'type',
+                                      key: 'type',
+                                      width: 70,
+                                      render: (t) => (
+                                        <Tag color={t === 'income' ? 'green' : 'red'}>
+                                          {t === 'income' ? '收入' : '支出'}
+                                        </Tag>
+                                      ),
+                                    },
+                                    {
+                                      title: '金额',
+                                      dataIndex: 'amount',
+                                      key: 'amount',
+                                      width: 120,
+                                      align: 'right',
+                                      render: (v, row) => (
+                                        <span
+                                          style={{
+                                            color: row.type === 'income' ? '#3f8600' : '#cf1322',
+                                            fontWeight: 'bold',
+                                          }}
+                                        >
+                                          {row.type === 'income' ? '+' : '-'}
+                                          {formatCurrency(v)}
+                                        </span>
+                                      ),
+                                    },
+                                    { title: '描述', dataIndex: 'description', key: 'description' },
+                                  ]}
+                                  dataSource={r.system_transactions}
+                                  rowKey="id"
+                                  pagination={false}
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <Text type="secondary">银行原始数据：</Text>
+                              <pre style={{ background: '#fafafa', padding: 8, borderRadius: 4, marginTop: 4 }}>
+                                {JSON.stringify(r.bank_record.raw_data, null, 2)}
+                              </pre>
+                            </div>
+                          </div>
+                        ),
+                      }}
+                    />
+                  ),
+                };
+              })}
           />
         </Card>
       )}

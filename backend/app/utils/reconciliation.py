@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import time
 import chardet
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
@@ -197,12 +198,93 @@ def calculate_match_score(bank_record: Dict, system_tx: Transaction) -> float:
     return round(score, 4)
 
 
+def _hungarian_algorithm(cost_matrix: List[List[float]]) -> Tuple[List[int], float]:
+    """
+    匈牙利算法（KM算法）求解二分图最小权匹配。
+    cost_matrix: n x m 矩阵，n <= m
+    返回：(每行匹配的列索引列表, 总成本)
+    """
+    n = len(cost_matrix)
+    if n == 0:
+        return [], 0.0
+    m = len(cost_matrix[0])
+    if m == 0:
+        return [], 0.0
+    if n > m:
+        raise ValueError("行数不能大于列数")
+
+    INF = float('inf')
+    u = [0.0] * (n + 1)
+    v = [0.0] * (m + 1)
+    p = [0] * (m + 1)
+    way = [0] * (m + 1)
+
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = [INF] * (m + 1)
+        used = [False] * (m + 1)
+
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = INF
+            j1 = 0
+
+            for j in range(1, m + 1):
+                if not used[j]:
+                    cur = cost_matrix[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+
+            for j in range(m + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+
+            j0 = j1
+            if p[j0] == 0:
+                break
+
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+
+    result = [-1] * n
+    for j in range(1, m + 1):
+        if p[j] != 0:
+            result[p[j] - 1] = j - 1
+
+    total_cost = -v[0]
+    return result, total_cost
+
+
+def _calc_confidence(match_type: str, score: float) -> str:
+    if match_type == 'split':
+        return 'low'
+    if score >= 0.85:
+        return 'high'
+    if score >= 0.7:
+        return 'medium'
+    return 'low'
+
+
 def _find_split_match(
     bank_rec: Dict,
     system_txs: List[Transaction],
     used_tx_ids: set,
     max_txs: int = 5,
     max_amount_diff_ratio: float = 0.01,
+    time_limit_sec: float = 3.0,
 ) -> Optional[Tuple[float, List[Transaction]]]:
     bank_amount = bank_rec["amount"]
     bank_date = bank_rec["date"]
@@ -229,7 +311,15 @@ def _find_split_match(
 
     candidates.sort(key=lambda x: x.amount, reverse=True)
 
+    start_time = time.time()
+    _timeout = [False]
+
     def backtrack(start_idx, current_sum, selected):
+        if _timeout[0]:
+            return None
+        if time.time() - start_time > time_limit_sec:
+            _timeout[0] = True
+            return None
         if len(selected) > max_txs:
             return None
         diff = abs(current_sum - bank_amount)
@@ -247,6 +337,8 @@ def _find_split_match(
             if result is not None:
                 return result
             selected.pop()
+            if _timeout[0]:
+                return None
         return None
 
     result = backtrack(0, 0.0, [])
@@ -272,46 +364,65 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
     used_bank_indices = set()
     matched_pairs = []
 
-    single_candidates = []
+    valid_bank_indices = []
+    valid_tx_list = []
+    tx_id_to_idx = {}
+
     for b_idx, bank_rec in enumerate(bank_records):
-        for tx in system_transactions:
-            if tx.id in used_tx_ids:
-                continue
-            if bank_rec["type"] != tx.type:
-                continue
-            s = calculate_match_score(bank_rec, tx)
-            if s > 0.7:
-                single_candidates.append((s, b_idx, tx.id, bank_rec, tx, "single"))
+        valid_bank_indices.append(b_idx)
 
-    split_candidates = []
-    for b_idx, bank_rec in enumerate(bank_records):
-        result = _find_split_match(bank_rec, system_transactions, used_tx_ids)
-        if result and result[0] > 0.7:
-            score, txs = result
-            split_candidates.append((score, b_idx, [t.id for t in txs], bank_rec, txs, "split"))
+    for tx_idx, tx in enumerate(system_transactions):
+        tx_id_to_idx[tx.id] = tx_idx
+        valid_tx_list.append(tx)
 
-    all_candidates = single_candidates + split_candidates
-    all_candidates.sort(key=lambda x: x[0], reverse=True)
+    n_bank = len(valid_bank_indices)
+    n_tx = len(valid_tx_list)
 
-    for item in all_candidates:
-        score = item[0]
-        b_idx = item[1]
-        tx_ids = item[2]
-        bank_rec = item[3]
-        tx_or_txs = item[4]
-        match_type = item[5]
+    if n_bank > 0 and n_tx > 0:
+        cost_matrix = []
+        score_matrix = []
 
-        if b_idx in used_bank_indices:
-            continue
-        if isinstance(tx_ids, list):
-            if any(tid in used_tx_ids for tid in tx_ids):
-                continue
+        for b_idx in valid_bank_indices:
+            bank_rec = bank_records[b_idx]
+            row_cost = []
+            row_score = []
+            for tx in valid_tx_list:
+                if bank_rec["type"] != tx.type:
+                    row_cost.append(1e9)
+                    row_score.append(0.0)
+                    continue
+                s = calculate_match_score(bank_rec, tx)
+                row_score.append(s)
+                if s > 0.7:
+                    row_cost.append(1.0 - s)
+                else:
+                    row_cost.append(1e9)
+            cost_matrix.append(row_cost)
+            score_matrix.append(row_score)
+
+        if n_bank <= n_tx:
+            assignment, _ = _hungarian_algorithm(cost_matrix)
         else:
-            if tx_ids in used_tx_ids:
-                continue
+            transposed_cost = []
+            for j in range(n_tx):
+                col = [cost_matrix[i][j] for i in range(n_bank)]
+                transposed_cost.append(col)
+            assignment_inv, _ = _hungarian_algorithm(transposed_cost)
+            assignment = [-1] * n_bank
+            for j, i in enumerate(assignment_inv):
+                if i != -1:
+                    assignment[i] = j
 
-        if match_type == "single":
-            tx = tx_or_txs
+        for i, j in enumerate(assignment):
+            if j == -1:
+                continue
+            if cost_matrix[i][j] >= 1e9:
+                continue
+            b_idx = valid_bank_indices[i]
+            tx = valid_tx_list[j]
+            score = score_matrix[i][j]
+            bank_rec = bank_records[b_idx]
+
             matched_pairs.append({
                 "match_type": "single",
                 "bank_record": bank_rec,
@@ -326,38 +437,64 @@ def match_records(bank_records: List[Dict], system_transactions: List[Transactio
                 },
                 "system_transactions": None,
                 "score": score,
+                "confidence": _calc_confidence("single", score),
                 "amount_diff": abs(bank_rec["amount"] - tx.amount) >= 0.001,
                 "date_diff": _date_diff_days(bank_rec["date"] or "", tx.date or ""),
             })
             used_tx_ids.add(tx.id)
-        else:
-            txs = tx_or_txs
-            total_amount = sum(t.amount for t in txs)
-            matched_pairs.append({
-                "match_type": "split",
-                "bank_record": bank_rec,
-                "system_transaction": None,
-                "system_transactions": [
-                    {
-                        "id": t.id,
-                        "amount": t.amount,
-                        "date": t.date,
-                        "type": t.type,
-                        "description": t.description,
-                        "category_id": t.category_id,
-                        "account_id": t.account_id,
-                    }
-                    for t in txs
-                ],
-                "score": score,
-                "amount_diff": abs(bank_rec["amount"] - total_amount) >= 0.001,
-                "date_diff": None,
-                "split_count": len(txs),
-                "total_system_amount": total_amount,
-            })
-            for t in txs:
-                used_tx_ids.add(t.id)
+            used_bank_indices.add(b_idx)
 
+    split_candidates = []
+    for b_idx, bank_rec in enumerate(bank_records):
+        if b_idx in used_bank_indices:
+            continue
+        result = _find_split_match(bank_rec, system_transactions, used_tx_ids)
+        if result and result[0] > 0.7:
+            score, txs = result
+            split_candidates.append((score, b_idx, [t.id for t in txs], bank_rec, txs, "split"))
+
+    split_candidates.sort(key=lambda x: x[0], reverse=True)
+
+    for item in split_candidates:
+        score = item[0]
+        b_idx = item[1]
+        tx_ids = item[2]
+        bank_rec = item[3]
+        tx_or_txs = item[4]
+        match_type = item[5]
+
+        if b_idx in used_bank_indices:
+            continue
+        if any(tid in used_tx_ids for tid in tx_ids):
+            continue
+
+        txs = tx_or_txs
+        total_amount = sum(t.amount for t in txs)
+        matched_pairs.append({
+            "match_type": "split",
+            "bank_record": bank_rec,
+            "system_transaction": None,
+            "system_transactions": [
+                {
+                    "id": t.id,
+                    "amount": t.amount,
+                    "date": t.date,
+                    "type": t.type,
+                    "description": t.description,
+                    "category_id": t.category_id,
+                    "account_id": t.account_id,
+                }
+                for t in txs
+            ],
+            "score": score,
+            "confidence": _calc_confidence("split", score),
+            "amount_diff": abs(bank_rec["amount"] - total_amount) >= 0.001,
+            "date_diff": None,
+            "split_count": len(txs),
+            "total_system_amount": total_amount,
+        })
+        for t in txs:
+            used_tx_ids.add(t.id)
         used_bank_indices.add(b_idx)
 
     unmatched_bank = [r for i, r in enumerate(bank_records) if i not in used_bank_indices]

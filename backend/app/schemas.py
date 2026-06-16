@@ -431,6 +431,7 @@ class MatchedPair(BaseModel):
     system_transaction: Optional[SystemTransactionShort] = None
     system_transactions: Optional[List[SystemTransactionShort]] = None
     score: float
+    confidence: str
     amount_diff: bool
     date_diff: Optional[int] = None
     split_count: Optional[int] = None
