@@ -195,6 +195,9 @@ def _find_split_match(
     bank_date = bank_rec["date"]
     bank_type = bank_rec["type"]
 
+    if not bank_date:
+        return None
+
     candidates = []
     for tx in system_txs:
         if tx.id in used_tx_ids:
@@ -203,10 +206,12 @@ def _find_split_match(
             continue
         if tx.amount >= bank_amount:
             continue
-        if bank_date and tx.date:
+        if tx.date:
             diff = _date_diff_days(bank_date, tx.date)
             if diff is None or diff != 0:
                 continue
+        else:
+            continue
         candidates.append(tx)
 
     candidates.sort(key=lambda x: x.amount, reverse=True)
@@ -238,11 +243,11 @@ def _find_split_match(
     total_amount = sum(t.amount for t in result)
     amount_score = _calc_amount_score(bank_amount, total_amount, max_ratio=max_amount_diff_ratio, max_abs=0.01)
 
-    date_score = 0.3 if bank_date else 0.0
+    date_score = 0.3
 
     desc_sims = [_levenshtein_similarity(bank_rec.get("description") or "", t.description or "") for t in result]
     avg_desc_sim = sum(desc_sims) / len(desc_sims) if desc_sims else 0.0
-    desc_score = 0.3 if avg_desc_sim > 0.5 else 0.0
+    desc_score = avg_desc_sim * 0.3
 
     score = amount_score * 0.4 + date_score + desc_score
     return round(score, 4), result
