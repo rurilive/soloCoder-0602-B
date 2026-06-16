@@ -243,11 +243,11 @@ def _find_split_match(
     total_amount = sum(t.amount for t in result)
     amount_score = _calc_amount_score(bank_amount, total_amount, max_ratio=max_amount_diff_ratio, max_abs=0.01)
 
-    date_score = 0.3
+    date_score = 0.1
 
     desc_sims = [_levenshtein_similarity(bank_rec.get("description") or "", t.description or "") for t in result]
     avg_desc_sim = sum(desc_sims) / len(desc_sims) if desc_sims else 0.0
-    desc_score = avg_desc_sim * 0.3
+    desc_score = avg_desc_sim * 0.4
 
     score = amount_score * 0.4 + date_score + desc_score
     return round(score, 4), result
