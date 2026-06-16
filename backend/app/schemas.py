@@ -440,6 +440,7 @@ class MatchedPair(BaseModel):
 
 
 class ReconciliationUploadResponse(BaseModel):
+    session_id: str
     encoding: str
     delimiter: str
     total_bank_records: int
@@ -475,10 +476,8 @@ class ReconciliationImportResult(BaseModel):
 
 
 class MatchActionRequest(BaseModel):
+    session_id: str
     bank_row_index: int
-    matched_pairs: List[MatchedPair]
-    unmatched_bank: List[BankRecord]
-    unmatched_system: List[SystemTransactionShort]
 
 
 class MatchActionResponse(BaseModel):

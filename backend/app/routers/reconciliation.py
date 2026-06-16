@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Dict, Any
 import re
+import uuid
 from datetime import datetime
 
 from app.database import get_db
@@ -26,6 +27,8 @@ router = APIRouter(prefix="/api/reconciliation", tags=["reconciliation"])
 
 DATE_FORMAT = "%Y-%m-%d"
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+_session_store: Dict[str, Dict[str, Any]] = {}
 
 
 def _validate_date(value: str, field_name: str):
@@ -111,8 +114,17 @@ async def upload_bank_statement(
 
     result = match_records(bank_records, system_transactions)
 
+    session_id = str(uuid.uuid4())
+    _session_store[session_id] = {
+        "matched_pairs": result["matched_pairs"],
+        "unmatched_bank": result["unmatched_bank"],
+        "unmatched_system": result["unmatched_system"],
+        "created_at": datetime.now(),
+    }
+
     confirmed_count = count_confirmed_matches(result["matched_pairs"])
     return {
+        "session_id": session_id,
         "encoding": encoding,
         "delimiter": delimiter,
         "total_bank_records": len(bank_records),
@@ -192,9 +204,20 @@ def import_unmatched_records(
 
 @router.post("/confirm", response_model=MatchActionResponse)
 def confirm_low_match(data: MatchActionRequest):
-    matched_pairs = [p.model_dump() for p in data.matched_pairs]
-    unmatched_bank = [r.model_dump() for r in data.unmatched_bank]
-    unmatched_system = [t.model_dump() for t in data.unmatched_system]
+    session = _session_store.get(data.session_id)
+    if not session:
+        return {
+            "success": False,
+            "matched_count": 0,
+            "matched_pairs": [],
+            "unmatched_bank": [],
+            "unmatched_system": [],
+            "error": "会话不存在或已过期，请重新上传",
+        }
+
+    matched_pairs = session["matched_pairs"]
+    unmatched_bank = session["unmatched_bank"]
+    unmatched_system = session["unmatched_system"]
 
     result = confirm_match(
         matched_pairs,
@@ -207,11 +230,15 @@ def confirm_low_match(data: MatchActionRequest):
         return {
             "success": False,
             "matched_count": count_confirmed_matches(matched_pairs),
-            "matched_pairs": data.matched_pairs,
-            "unmatched_bank": data.unmatched_bank,
-            "unmatched_system": data.unmatched_system,
+            "matched_pairs": matched_pairs,
+            "unmatched_bank": unmatched_bank,
+            "unmatched_system": unmatched_system,
             "error": result.get("error"),
         }
+
+    session["matched_pairs"] = result["matched_pairs"]
+    session["unmatched_bank"] = result["unmatched_bank"]
+    session["unmatched_system"] = result["unmatched_system"]
 
     return {
         "success": True,
@@ -224,9 +251,20 @@ def confirm_low_match(data: MatchActionRequest):
 
 @router.post("/reject", response_model=MatchActionResponse)
 def reject_low_match(data: MatchActionRequest):
-    matched_pairs = [p.model_dump() for p in data.matched_pairs]
-    unmatched_bank = [r.model_dump() for r in data.unmatched_bank]
-    unmatched_system = [t.model_dump() for t in data.unmatched_system]
+    session = _session_store.get(data.session_id)
+    if not session:
+        return {
+            "success": False,
+            "matched_count": 0,
+            "matched_pairs": [],
+            "unmatched_bank": [],
+            "unmatched_system": [],
+            "error": "会话不存在或已过期，请重新上传",
+        }
+
+    matched_pairs = session["matched_pairs"]
+    unmatched_bank = session["unmatched_bank"]
+    unmatched_system = session["unmatched_system"]
 
     result = reject_match(
         matched_pairs,
@@ -239,11 +277,15 @@ def reject_low_match(data: MatchActionRequest):
         return {
             "success": False,
             "matched_count": count_confirmed_matches(matched_pairs),
-            "matched_pairs": data.matched_pairs,
-            "unmatched_bank": data.unmatched_bank,
-            "unmatched_system": data.unmatched_system,
+            "matched_pairs": matched_pairs,
+            "unmatched_bank": unmatched_bank,
+            "unmatched_system": unmatched_system,
             "error": result.get("error"),
         }
+
+    session["matched_pairs"] = result["matched_pairs"]
+    session["unmatched_bank"] = result["unmatched_bank"]
+    session["unmatched_system"] = result["unmatched_system"]
 
     return {
         "success": True,

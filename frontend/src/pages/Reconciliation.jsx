@@ -53,6 +53,7 @@ export default function Reconciliation({ currentLedger }) {
 
   const [uploaded, setUploaded] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rematching, setRematching] = useState(false);
@@ -164,6 +165,7 @@ export default function Reconciliation({ currentLedger }) {
         dateRange ? dateRange[1].format('YYYY-MM-DD') : null,
       );
       setUploadResult(result);
+      setSessionId(result.session_id);
       setMatchedPairs(result.matched_pairs);
       setUnmatchedBank(result.unmatched_bank);
       setUnmatchedSystem(result.unmatched_system);
@@ -423,12 +425,10 @@ export default function Reconciliation({ currentLedger }) {
       return;
     }
     try {
-      const result = await reconciliationApi.confirm({
-        bank_row_index: pair.bank_record.row_index,
-        matched_pairs: matchedPairs,
-        unmatched_bank: unmatchedBank,
-        unmatched_system: unmatchedSystem,
-      });
+      const result = await reconciliationApi.confirm(
+        sessionId,
+        pair.bank_record.row_index
+      );
       if (result.success) {
         setMatchedPairs(result.matched_pairs);
         setUnmatchedBank(result.unmatched_bank);
@@ -452,12 +452,10 @@ export default function Reconciliation({ currentLedger }) {
       return;
     }
     try {
-      const result = await reconciliationApi.reject({
-        bank_row_index: pair.bank_record.row_index,
-        matched_pairs: matchedPairs,
-        unmatched_bank: unmatchedBank,
-        unmatched_system: unmatchedSystem,
-      });
+      const result = await reconciliationApi.reject(
+        sessionId,
+        pair.bank_record.row_index
+      );
       if (result.success) {
         setMatchedPairs(result.matched_pairs);
         setUnmatchedBank(result.unmatched_bank);
@@ -1307,6 +1305,7 @@ export default function Reconciliation({ currentLedger }) {
           <Button onClick={() => {
             setUploaded(false);
             setUploadResult(null);
+            setSessionId(null);
             setUploadedFile(null);
             setMatchedPairs([]);
             setUnmatchedBank([]);

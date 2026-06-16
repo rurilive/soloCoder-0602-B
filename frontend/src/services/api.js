@@ -174,12 +174,18 @@ export const reconciliationApi = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  confirm: (data) => request('/reconciliation/confirm', {
+  confirm: (sessionId, bankRowIndex) => request('/reconciliation/confirm', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      session_id: sessionId,
+      bank_row_index: bankRowIndex,
+    }),
   }),
-  reject: (data) => request('/reconciliation/reject', {
+  reject: (sessionId, bankRowIndex) => request('/reconciliation/reject', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      session_id: sessionId,
+      bank_row_index: bankRowIndex,
+    }),
   }),
 };
