@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict
@@ -107,9 +108,9 @@ def recalculate_schedule_after_early_repayment(
     annual_rate: float,
     repayment_type: str = "reduce_term",
 ) -> List[Dict]:
-    paid_schedule = [dict(item) for item in original_schedule[:early_repayment_period - 1]]
+    paid_schedule = [copy.deepcopy(item) for item in original_schedule[:early_repayment_period - 1]]
 
-    target_period = dict(original_schedule[early_repayment_period - 1])
+    target_period = copy.deepcopy(original_schedule[early_repayment_period - 1])
 
     remaining_principal = target_period["remaining_principal"] - early_repayment_amount
     if remaining_principal < 0:
