@@ -209,11 +209,11 @@ export default function LoanManagement({ currentLedger }) {
   };
 
   const getPaidAmount = (schedule) => {
-    return schedule.filter((s) => s.status === 'paid').reduce((sum, s) => sum + s.payment_amount + s.early_repayment_amount, 0);
+    return schedule.filter((s) => s.status === 'paid').reduce((sum, s) => sum + s.payment_amount, 0);
   };
 
   const getRemainingAmount = (schedule) => {
-    return schedule.filter((s) => s.status !== 'paid').reduce((sum, s) => sum + s.payment_amount + s.early_repayment_amount, 0);
+    return schedule.filter((s) => s.status !== 'paid').reduce((sum, s) => sum + s.payment_amount, 0);
   };
 
   const getOverdueCount = (schedule) => {

@@ -330,7 +330,7 @@ def generate_repayment_transaction(
     if schedule.status == "paid":
         raise HTTPException(status_code=400, detail="该期已生成交易")
 
-    total_amount = schedule.payment_amount + schedule.early_repayment_amount
+    total_amount = schedule.payment_amount
     description = f"{loan.name} - 第{schedule.period_number}期还款"
     if schedule.is_early_repayment:
         description += f"（含提前还款{schedule.early_repayment_amount}）"
@@ -413,7 +413,7 @@ def generate_overdue_transactions(loan_id: int, db: Session = Depends(get_db)):
 
     for schedule in schedules:
         try:
-            total_amount = schedule.payment_amount + schedule.early_repayment_amount
+            total_amount = schedule.payment_amount
             description = f"{loan.name} - 第{schedule.period_number}期还款"
             if schedule.is_early_repayment:
                 description += f"（含提前还款{schedule.early_repayment_amount}）"
