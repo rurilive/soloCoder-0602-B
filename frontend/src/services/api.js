@@ -206,4 +206,5 @@ export const loanApi = {
   generateTransaction: (loanId, scheduleId) => request(`/loans/${loanId}/generate-transaction/${scheduleId}`, { method: 'POST' }),
   generateOverdueTransactions: (loanId) => request(`/loans/${loanId}/generate-overdue-transactions`, { method: 'POST' }),
   getRemainingPrincipal: (id) => request(`/loans/${id}/remaining-principal`),
+  simulateRateChange: (data, signal) => request('/loans/rate-change/simulation', { method: 'POST', body: JSON.stringify(data), signal }),
 };

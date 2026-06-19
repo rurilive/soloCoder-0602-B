@@ -15,10 +15,13 @@ from app.schemas import (
     EarlyRepaymentPreviewRequest,
     EarlyRepaymentPreviewResponse,
     LoanRemainingPrincipalPoint,
+    RateChangeSimulationRequest,
+    RateChangeSimulationResponse,
 )
 from app.utils.amortization import (
     calculate_amortization_schedule,
     recalculate_schedule_after_early_repayment,
+    apply_multiple_rate_changes,
 )
 
 router = APIRouter(prefix="/api/loans", tags=["loans"])
@@ -594,4 +597,191 @@ def generate_overdue_transactions(loan_id: int, db: Session = Depends(get_db)):
         "failed_count": failed_count,
         "failed_details": failed_details,
         "total_processed": len(schedules),
+    }
+
+
+RATE_CHANGE_COLORS = [
+    "#ff7875",
+    "#ffa940",
+    "#ffd666",
+    "#95de64",
+    "#5cdbd3",
+    "#69c0ff",
+    "#85a5ff",
+    "#b37feb",
+    "#ff85c0",
+]
+
+
+@router.post("/rate-change/simulation", response_model=RateChangeSimulationResponse)
+def simulate_rate_change(data: RateChangeSimulationRequest, db: Session = Depends(get_db)):
+    loan = db.query(Loan).filter(Loan.id == data.loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="贷款不存在")
+
+    if not data.rate_changes or len(data.rate_changes) == 0:
+        raise HTTPException(status_code=400, detail="请至少设置一次利率变动")
+
+    schedules = db.query(LoanRepaymentSchedule).filter(
+        LoanRepaymentSchedule.loan_id == data.loan_id
+    ).order_by(LoanRepaymentSchedule.period_number).all()
+
+    if len(schedules) == 0:
+        raise HTTPException(status_code=400, detail="该贷款没有还款计划")
+
+    schedule_dicts = []
+    for s in schedules:
+        item = {
+            "period_number": s.period_number,
+            "due_date": s.due_date,
+            "payment_amount": s.payment_amount,
+            "principal_amount": s.principal_amount,
+            "interest_amount": s.interest_amount,
+            "remaining_principal": s.remaining_principal,
+            "status": s.status,
+            "is_early_repayment": s.is_early_repayment,
+            "early_repayment_amount": s.early_repayment_amount,
+            "annual_rate": loan.annual_rate,
+        }
+        schedule_dicts.append(item)
+
+    original_schedule = [dict(item) for item in schedule_dicts]
+
+    for i, change in enumerate(data.rate_changes):
+        if change.change_period < 1:
+            raise HTTPException(status_code=400, detail=f"第{i+1}次利率变动的期次必须大于0")
+        if change.new_annual_rate < 0:
+            raise HTTPException(status_code=400, detail=f"第{i+1}次利率变动的新利率不能为负数")
+
+        period_exists = False
+        for s in schedule_dicts:
+            if s["period_number"] == change.change_period:
+                period_exists = True
+                if s["status"] == "paid":
+                    raise HTTPException(status_code=400, detail=f"第{change.change_period}期已还款，不能在该期调整利率")
+                break
+
+        if not period_exists:
+            raise HTTPException(status_code=400, detail=f"第{change.change_period}期不存在")
+
+    rate_changes_list = [
+        {"change_period": c.change_period, "new_annual_rate": c.new_annual_rate}
+        for c in data.rate_changes
+    ]
+
+    new_schedule = apply_multiple_rate_changes(
+        original_schedule=schedule_dicts,
+        rate_changes=rate_changes_list,
+    )
+
+    original_total_payment = sum(item["payment_amount"] for item in original_schedule)
+    original_total_interest = sum(item["interest_amount"] for item in original_schedule)
+    original_total_periods = len(original_schedule)
+
+    new_total_payment = sum(item["payment_amount"] for item in new_schedule)
+    new_total_interest = sum(item["interest_amount"] for item in new_schedule)
+    new_total_periods = len(new_schedule)
+
+    diff_schedule = []
+    max_len = max(len(original_schedule), len(new_schedule))
+
+    sorted_changes = sorted(rate_changes_list, key=lambda x: x["change_period"])
+
+    for i in range(max_len):
+        orig = original_schedule[i] if i < len(original_schedule) else None
+        new = new_schedule[i] if i < len(new_schedule) else None
+
+        rate_change_index = None
+        rate_changed = False
+        original_rate = loan.annual_rate
+        new_rate = loan.annual_rate
+
+        if new:
+            rate_change_index = new.get("rate_change_index")
+            rate_changed = new.get("is_rate_changed", False)
+            new_rate = new.get("annual_rate", loan.annual_rate)
+
+        if orig:
+            original_rate = orig.get("annual_rate", loan.annual_rate)
+
+        if orig and new:
+            diff_schedule.append({
+                "period_number": new["period_number"],
+                "due_date": new["due_date"],
+                "original_rate": original_rate,
+                "new_rate": new_rate,
+                "rate_changed": rate_changed,
+                "rate_change_index": rate_change_index,
+                "original_payment": orig["payment_amount"],
+                "new_payment": new["payment_amount"],
+                "payment_diff": round(new["payment_amount"] - orig["payment_amount"], 2),
+                "original_principal": orig["principal_amount"],
+                "new_principal": new["principal_amount"],
+                "original_interest": orig["interest_amount"],
+                "new_interest": new["interest_amount"],
+                "interest_diff": round(new["interest_amount"] - orig["interest_amount"], 2),
+                "original_remaining": orig["remaining_principal"],
+                "new_remaining": new["remaining_principal"],
+            })
+        elif new:
+            diff_schedule.append({
+                "period_number": new["period_number"],
+                "due_date": new["due_date"],
+                "original_rate": original_rate,
+                "new_rate": new_rate,
+                "rate_changed": rate_changed,
+                "rate_change_index": rate_change_index,
+                "original_payment": 0,
+                "new_payment": new["payment_amount"],
+                "payment_diff": new["payment_amount"],
+                "original_principal": 0,
+                "new_principal": new["principal_amount"],
+                "original_interest": 0,
+                "new_interest": new["interest_amount"],
+                "interest_diff": new["interest_amount"],
+                "original_remaining": 0,
+                "new_remaining": new["remaining_principal"],
+            })
+        elif orig:
+            diff_schedule.append({
+                "period_number": orig["period_number"],
+                "due_date": orig["due_date"],
+                "original_rate": original_rate,
+                "new_rate": original_rate,
+                "rate_changed": False,
+                "rate_change_index": None,
+                "original_payment": orig["payment_amount"],
+                "new_payment": 0,
+                "payment_diff": round(-orig["payment_amount"], 2),
+                "original_principal": orig["principal_amount"],
+                "new_principal": 0,
+                "original_interest": orig["interest_amount"],
+                "new_interest": 0,
+                "interest_diff": round(-orig["interest_amount"], 2),
+                "original_remaining": orig["remaining_principal"],
+                "new_remaining": 0,
+            })
+
+    last_remaining = new_schedule[-1]["remaining_principal"] if new_schedule else 0
+    if last_remaining > 0.01:
+        raise HTTPException(
+            status_code=500,
+            detail=f"计算错误：最后一期剩余本金 {last_remaining} 不为零，请检查参数",
+        )
+
+    rate_change_colors = RATE_CHANGE_COLORS[:len(sorted_changes)]
+
+    return {
+        "original_schedule": original_schedule,
+        "new_schedule": new_schedule,
+        "diff_schedule": diff_schedule,
+        "original_total_payment": round(original_total_payment, 2),
+        "new_total_payment": round(new_total_payment, 2),
+        "original_total_interest": round(original_total_interest, 2),
+        "new_total_interest": round(new_total_interest, 2),
+        "total_payment_diff": round(new_total_payment - original_total_payment, 2),
+        "total_interest_diff": round(new_total_interest - original_total_interest, 2),
+        "original_total_periods": original_total_periods,
+        "new_total_periods": new_total_periods,
+        "rate_change_colors": rate_change_colors,
     }

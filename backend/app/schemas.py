@@ -636,4 +636,48 @@ class LoanGenerateTransactionRequest(BaseModel):
     schedule_id: int
 
 
+class RateChangeItem(BaseModel):
+    change_period: int
+    new_annual_rate: float
+
+
+class RateChangeSimulationRequest(BaseModel):
+    loan_id: int
+    rate_changes: List[RateChangeItem]
+
+
+class RateChangeScheduleDiff(BaseModel):
+    period_number: int
+    due_date: str
+    original_rate: float
+    new_rate: float
+    rate_changed: bool
+    rate_change_index: Optional[int] = None
+    original_payment: float
+    new_payment: float
+    payment_diff: float
+    original_principal: float
+    new_principal: float
+    original_interest: float
+    new_interest: float
+    interest_diff: float
+    original_remaining: float
+    new_remaining: float
+
+
+class RateChangeSimulationResponse(BaseModel):
+    original_schedule: List[Dict]
+    new_schedule: List[Dict]
+    diff_schedule: List[RateChangeScheduleDiff]
+    original_total_payment: float
+    new_total_payment: float
+    original_total_interest: float
+    new_total_interest: float
+    total_payment_diff: float
+    total_interest_diff: float
+    original_total_periods: int
+    new_total_periods: float
+    rate_change_colors: List[str]
+
+
 LoanWithSchedule.model_rebuild()

@@ -30,6 +30,10 @@ import {
   CalendarOutlined,
   InfoCircleOutlined,
   ThunderboltOutlined,
+  RiseOutlined,
+  FallOutlined,
+  MinusOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
@@ -71,6 +75,14 @@ export default function LoanManagement({ currentLedger }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [form] = Form.useForm();
   const [earlyForm] = Form.useForm();
+  const [rateChangeModalOpen, setRateChangeModalOpen] = useState(false);
+  const [rateChangeList, setRateChangeList] = useState([{ change_period: null, new_annual_rate: null }]);
+  const [rateChangePreviewData, setRateChangePreviewData] = useState(null);
+  const [rateChangePreviewLoading, setRateChangePreviewLoading] = useState(false);
+  const [rateChangeForm] = Form.useForm();
+
+  const ratePreviewDebounceRef = useRef(null);
+  const ratePreviewAbortRef = useRef(null);
 
   const previewDebounceRef = useRef(null);
   const previewAbortRef = useRef(null);
@@ -221,6 +233,95 @@ export default function LoanManagement({ currentLedger }) {
       previewAbortRef.current.abort();
       previewAbortRef.current = null;
     }
+  };
+
+  const cancelRateChangePendingPreview = () => {
+    if (ratePreviewDebounceRef.current) {
+      clearTimeout(ratePreviewDebounceRef.current);
+      ratePreviewDebounceRef.current = null;
+    }
+    if (ratePreviewAbortRef.current) {
+      ratePreviewAbortRef.current.abort();
+      ratePreviewAbortRef.current = null;
+    }
+  };
+
+  const doFetchRateChangePreview = useCallback(async (changes) => {
+    if (!selectedLoan || !changes || changes.length === 0) {
+      setRateChangePreviewData(null);
+      setRateChangePreviewLoading(false);
+      return;
+    }
+
+    const validChanges = changes.filter(
+      (c) => c.change_period != null && c.new_annual_rate != null && c.change_period > 0 && c.new_annual_rate >= 0
+    );
+
+    if (validChanges.length === 0) {
+      setRateChangePreviewData(null);
+      setRateChangePreviewLoading(false);
+      return;
+    }
+
+    if (ratePreviewAbortRef.current) {
+      ratePreviewAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    ratePreviewAbortRef.current = abortController;
+
+    setRateChangePreviewLoading(true);
+    try {
+      const data = await loanApi.simulateRateChange({
+        loan_id: selectedLoan.id,
+        rate_changes: validChanges,
+      }, abortController.signal);
+      if (abortController.signal.aborted) return;
+      setRateChangePreviewData(data);
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
+      setRateChangePreviewData(null);
+      message.error('计算失败: ' + e.message);
+    } finally {
+      if (!abortController.signal.aborted) {
+        setRateChangePreviewLoading(false);
+      }
+      if (ratePreviewAbortRef.current === abortController) {
+        ratePreviewAbortRef.current = null;
+      }
+    }
+  }, [selectedLoan]);
+
+  const fetchRateChangePreview = useCallback((changes) => {
+    cancelRateChangePendingPreview();
+    ratePreviewDebounceRef.current = setTimeout(() => {
+      doFetchRateChangePreview(changes);
+    }, 500);
+  }, [doFetchRateChangePreview]);
+
+  const addRateChange = () => {
+    const newList = [...rateChangeList, { change_period: null, new_annual_rate: null }];
+    setRateChangeList(newList);
+  };
+
+  const removeRateChange = (index) => {
+    if (rateChangeList.length <= 1) return;
+    const newList = rateChangeList.filter((_, i) => i !== index);
+    setRateChangeList(newList);
+    fetchRateChangePreview(newList);
+  };
+
+  const updateRateChange = (index, field, value) => {
+    const newList = [...rateChangeList];
+    newList[index] = { ...newList[index], [field]: value };
+    setRateChangeList(newList);
+    fetchRateChangePreview(newList);
+  };
+
+  const openRateChangeModal = () => {
+    setRateChangeList([{ change_period: null, new_annual_rate: null }]);
+    setRateChangePreviewData(null);
+    cancelRateChangePendingPreview();
+    setRateChangeModalOpen(true);
   };
 
   const doFetchPreview = useCallback(async (values) => {
@@ -557,6 +658,16 @@ export default function LoanManagement({ currentLedger }) {
                 onClick={openEarlyRepaymentModal}
               >
                 提前还款
+              </Button>
+            )}
+            {selectedLoan.status === 'active' && (
+              <Button
+                type="primary"
+                icon={<LineChartOutlined />}
+                onClick={openRateChangeModal}
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              >
+                利率变动模拟
               </Button>
             )}
             {selectedLoan.status === 'active' && getDueUnprocessedCount(selectedLoan.schedule) > 0 && (
@@ -1098,6 +1209,399 @@ export default function LoanManagement({ currentLedger }) {
             </p>
           </Card>
         </Form>
+      </Modal>
+
+      <Modal
+        title="利率变动模拟"
+        open={rateChangeModalOpen}
+        onOk={() => {
+          cancelRateChangePendingPreview();
+          setRateChangeModalOpen(false);
+          setRateChangePreviewData(null);
+        }}
+        onCancel={() => {
+          cancelRateChangePendingPreview();
+          setRateChangeModalOpen(false);
+          setRateChangePreviewData(null);
+        }}
+        destroyOnHidden
+        width={1100}
+        okText="关闭"
+        cancelText="取消"
+      >
+        <div>
+          <Card size="small" style={{ marginBottom: 16 }} title="利率变动设置">
+            {rateChangeList.map((item, index) => (
+              <Row key={index} gutter={16} style={{ marginBottom: 12 }} align="middle">
+                <Col span={1}>
+                  <span style={{ fontWeight: 'bold', color: '#666' }}>第{index + 1}次</span>
+                </Col>
+                <Col span={8}>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={item.change_period}
+                    onChange={(value) => updateRateChange(index, 'change_period', value)}
+                    placeholder="选择变动期次"
+                    options={selectedLoan?.schedule
+                      .filter((s) => s.status !== 'paid')
+                      .map((s) => ({
+                        label: `第${s.period_number}期 (${s.due_date}) - 剩余本金: ${formatCurrency(s.remaining_principal)}`,
+                        value: s.period_number,
+                      }))}
+                  />
+                </Col>
+                <Col span={8}>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    min={0}
+                    step={0.01}
+                    value={item.new_annual_rate}
+                    onChange={(value) => updateRateChange(index, 'new_annual_rate', value)}
+                    placeholder="输入新年利率 (%)"
+                    suffix="%"
+                  />
+                </Col>
+                <Col span={6}>
+                  <Space>
+                    {index > 0 && (
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeRateChange(index)}
+                      >
+                        删除
+                      </Button>
+                    )}
+                    {index === rateChangeList.length - 1 && (
+                      <Button
+                        type="text"
+                        icon={<PlusOutlined />}
+                        onClick={addRateChange}
+                      >
+                        叠加变动
+                      </Button>
+                    )}
+                  </Space>
+                </Col>
+              </Row>
+            ))}
+            <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
+              <InfoCircleOutlined style={{ marginRight: 4 }} />
+              说明：从指定期次起按新利率重算剩余还款计划，保持原月供不变，自动计算新的还清期数，最后一期补齐尾差。支持多次利率变动叠加。
+            </div>
+          </Card>
+
+          {rateChangePreviewData && (
+            <div>
+              <Divider orientation="left">利率变动对比</Divider>
+              <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={4}>
+                  <Card size="small" style={{ background: '#f5f5f5' }}>
+                    <Statistic
+                      title="原总利息"
+                      value={rateChangePreviewData.original_total_interest}
+                      precision={2}
+                      prefix="¥"
+                    />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small" style={{ background: '#e6f7ff', borderColor: '#91d5ff' }}>
+                    <Statistic
+                      title="新总利息"
+                      value={rateChangePreviewData.new_total_interest}
+                      precision={2}
+                      prefix="¥"
+                      valueStyle={{ color: '#1890ff' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card
+                    size="small"
+                    style={{
+                      background: rateChangePreviewData.total_interest_diff <= 0 ? '#f6ffed' : '#fff1f0',
+                      borderColor: rateChangePreviewData.total_interest_diff <= 0 ? '#b7eb8f' : '#ffa39e',
+                    }}
+                  >
+                    <Statistic
+                      title="利息差异"
+                      value={Math.abs(rateChangePreviewData.total_interest_diff)}
+                      precision={2}
+                      prefix={rateChangePreviewData.total_interest_diff < 0 ? '节省 ' : '增加 '}
+                      suffix="¥"
+                      valueStyle={{ color: rateChangePreviewData.total_interest_diff <= 0 ? '#52c41a' : '#ff4d4f' }}
+                      prefix=""
+                    />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small" style={{ background: '#f5f5f5' }}>
+                    <Statistic
+                      title="原总期数"
+                      value={rateChangePreviewData.original_total_periods}
+                      suffix="期"
+                    />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small" style={{ background: '#e6f7ff', borderColor: '#91d5ff' }}>
+                    <Statistic
+                      title="新总期数"
+                      value={rateChangePreviewData.new_total_periods}
+                      suffix="期"
+                      valueStyle={{ color: '#1890ff' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card
+                    size="small"
+                    style={{
+                      background: rateChangePreviewData.total_payment_diff <= 0 ? '#f6ffed' : '#fff1f0',
+                      borderColor: rateChangePreviewData.total_payment_diff <= 0 ? '#b7eb8f' : '#ffa39e',
+                    }}
+                  >
+                    <Statistic
+                      title="总还款差异"
+                      value={Math.abs(rateChangePreviewData.total_payment_diff)}
+                      precision={2}
+                      valueStyle={{ color: rateChangePreviewData.total_payment_diff <= 0 ? '#52c41a' : '#ff4d4f' }}
+                      suffix="¥"
+                      prefix={rateChangePreviewData.total_payment_diff < 0 ? '节省 ' : '增加 '}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+
+              {rateChangePreviewData.rate_change_colors && rateChangePreviewData.rate_change_colors.length > 0 && (
+                <Card size="small" style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+                    <span style={{ fontWeight: 'bold' }}>利率变动区间颜色标记：</span>
+                    {rateChangeList
+                      .filter((c) => c.change_period && c.new_annual_rate != null)
+                      .sort((a, b) => a.change_period - b.change_period)
+                      .map((c, i) => (
+                        <Space key={i} size={4}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: 16,
+                              height: 16,
+                              backgroundColor: rateChangePreviewData.rate_change_colors[i],
+                              borderRadius: 2,
+                            }}
+                          />
+                          <span>
+                            第{c.change_period}期起 {c.new_annual_rate}%
+                          </span>
+                        </Space>
+                      ))}
+                  </div>
+                </Card>
+              )}
+
+              <Card size="small" title="还款计划对比明细" style={{ maxHeight: 450, overflow: 'auto' }}>
+                <Table
+                  dataSource={rateChangePreviewData.diff_schedule}
+                  rowKey="period_number"
+                  size="small"
+                  pagination={false}
+                  onRow={(record) => ({
+                    style: {
+                      backgroundColor: record.rate_change_index != null
+                        ? rateChangePreviewData.rate_change_colors[record.rate_change_index] + '20'
+                        : undefined,
+                    },
+                  })}
+                  columns={[
+                    {
+                      title: '期次',
+                      dataIndex: 'period_number',
+                      key: 'period_number',
+                      width: 70,
+                      fixed: 'left',
+                      render: (v, r) => {
+                        const isNewOnly = r.original_payment === 0 && r.new_payment > 0;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <Space size={4}>
+                            <span>第{v}期</span>
+                            {r.rate_changed && <Tag color="purple">利率调整</Tag>}
+                            {isNewOnly && <Tag color="green">新增</Tag>}
+                            {isRemoved && <Tag color="red">减少</Tag>}
+                          </Space>
+                        );
+                      },
+                    },
+                    { title: '还款日', dataIndex: 'due_date', key: 'due_date', width: 100 },
+                    {
+                      title: '原利率',
+                      dataIndex: 'original_rate',
+                      key: 'original_rate',
+                      width: 80,
+                      align: 'center',
+                      render: (v) => `${v}%`,
+                    },
+                    {
+                      title: '新利率',
+                      dataIndex: 'new_rate',
+                      key: 'new_rate',
+                      width: 80,
+                      align: 'center',
+                      render: (v, r) => {
+                        if (r.original_rate !== v) {
+                          return (
+                            <span style={{ fontWeight: 'bold', color: '#722ed1' }}>
+                              {v}%
+                            </span>
+                          );
+                        }
+                        return `${v}%`;
+                      },
+                    },
+                    {
+                      title: '利率变动',
+                      dataIndex: 'new_rate',
+                      key: 'rate_change_icon',
+                      width: 80,
+                      align: 'center',
+                      render: (v, r) => {
+                        const diff = v - r.original_rate;
+                        if (diff > 0) {
+                          return (
+                            <span style={{ color: '#ff4d4f' }}>
+                              <RiseOutlined /> +{diff.toFixed(2)}%
+                            </span>
+                          );
+                        } else if (diff < 0) {
+                          return (
+                            <span style={{ color: '#52c41a' }}>
+                              <FallOutlined /> {diff.toFixed(2)}%
+                            </span>
+                          );
+                        }
+                        return <MinusOutlined style={{ color: '#999' }} />;
+                      },
+                    },
+                    {
+                      title: '原月供',
+                      dataIndex: 'original_payment',
+                      key: 'original_payment',
+                      width: 100,
+                      render: (v, r) => {
+                        if (v <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <span style={isRemoved ? { color: '#ff4d4f', textDecoration: 'line-through' } : {}}>
+                            {formatCurrency(v)}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      title: '新月供',
+                      dataIndex: 'new_payment',
+                      key: 'new_payment',
+                      width: 100,
+                      render: (v, r) => {
+                        const diff = r.payment_diff;
+                        const isNewOnly = r.original_payment === 0 && r.new_payment > 0;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        if (isRemoved) {
+                          return (
+                            <Space direction="vertical" size={0}>
+                              <span style={{ color: '#999', textDecoration: 'line-through' }}>{formatCurrency(0)}</span>
+                              <span style={{ color: '#52c41a', fontSize: 11, fontWeight: 'bold' }}>
+                                节省 {formatCurrency(Math.abs(diff))}
+                              </span>
+                            </Space>
+                          );
+                        }
+                        const color = isNewOnly ? '#52c41a' : (diff < 0 ? '#52c41a' : diff > 0 ? '#ff4d4f' : '#666');
+                        return (
+                          <Space direction="vertical" size={0}>
+                            <span style={{ color, fontWeight: 'bold' }}>{formatCurrency(v)}</span>
+                            {diff !== 0 && (
+                              <span style={{ color, fontSize: 11 }}>
+                                {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                              </span>
+                            )}
+                          </Space>
+                        );
+                      },
+                    },
+                    {
+                      title: '原利息',
+                      dataIndex: 'original_interest',
+                      key: 'original_interest',
+                      width: 90,
+                      render: (v, r) => {
+                        if (v <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <span style={isRemoved ? { color: '#ff4d4f' } : {}}>
+                            {formatCurrency(v)}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      title: '新利息',
+                      dataIndex: 'new_interest',
+                      key: 'new_interest',
+                      width: 90,
+                      render: (v, r) => {
+                        const diff = r.interest_diff;
+                        if (v <= 0 && r.original_interest <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const color = diff < 0 ? '#52c41a' : diff > 0 ? '#ff4d4f' : '#666';
+                        return (
+                          <Space direction="vertical" size={0}>
+                            <span style={{ color }}>{formatCurrency(v)}</span>
+                            {diff !== 0 && (
+                              <span style={{ color, fontSize: 11 }}>
+                                {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                              </span>
+                            )}
+                          </Space>
+                        );
+                      },
+                    },
+                    {
+                      title: '剩余本金',
+                      dataIndex: 'new_remaining',
+                      key: 'new_remaining',
+                      width: 110,
+                      render: (v, r) => {
+                        const val = v > 0 ? v : r.original_remaining;
+                        return (
+                          <span style={{ color: val === 0 ? '#52c41a' : undefined, fontWeight: val === 0 ? 'bold' : undefined }}>
+                            {formatCurrency(val)}
+                          </span>
+                        );
+                      },
+                    },
+                  ]}
+                  scroll={{ x: 1100 }}
+                />
+              </Card>
+            </div>
+          )}
+
+          {rateChangePreviewLoading && (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              正在计算利率变动后的还款计划...
+            </div>
+          )}
+
+          {!rateChangePreviewData && !rateChangePreviewLoading && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+              <InfoCircleOutlined style={{ fontSize: 24, marginBottom: 8, display: 'block' }} />
+              请设置利率变动的期次和新利率，系统将实时计算并显示对比结果
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

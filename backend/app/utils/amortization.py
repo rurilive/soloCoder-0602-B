@@ -306,6 +306,126 @@ def recalculate_schedule_after_early_repayment(
     return paid_schedule + new_schedule
 
 
+def recalculate_schedule_after_rate_change(
+    original_schedule: List[Dict],
+    change_period: int,
+    new_annual_rate: float,
+) -> List[Dict]:
+    paid_schedule = [copy.deepcopy(item) for item in original_schedule[:change_period - 1]]
+
+    target_period = copy.deepcopy(original_schedule[change_period - 1])
+    remaining_principal = target_period["remaining_principal"]
+    original_monthly_payment = target_period["payment_amount"]
+
+    if remaining_principal <= 0.01:
+        return original_schedule
+
+    monthly_rate = new_annual_rate / 100 / 12
+    start_dt = datetime.strptime(target_period["due_date"], "%Y-%m-%d")
+    repayment_day = start_dt.day
+    remaining = remaining_principal
+    schedule = []
+
+    period = 0
+    while remaining > 0.01:
+        period += 1
+        interest = remaining * monthly_rate
+        interest = round(interest, 2)
+
+        is_last_period = (remaining + interest) <= original_monthly_payment + 0.01
+
+        if is_last_period:
+            principal_payment = remaining
+            payment = principal_payment + interest
+        else:
+            if original_monthly_payment < interest:
+                payment = interest
+                principal_payment = 0
+            else:
+                payment = original_monthly_payment
+                principal_payment = payment - interest
+
+        remaining -= principal_payment
+
+        due_dt = start_dt + relativedelta(months=period)
+        try:
+            due_dt = due_dt.replace(day=repayment_day)
+        except ValueError:
+            due_dt = due_dt + relativedelta(day=repayment_day)
+
+        if remaining < 0.01:
+            remaining = 0.0
+
+        if period == 1:
+            schedule.append({
+                **target_period,
+                "period_number": change_period,
+                "due_date": due_dt.strftime("%Y-%m-%d"),
+                "payment_amount": round(payment, 2),
+                "principal_amount": round(principal_payment, 2),
+                "interest_amount": round(interest, 2),
+                "remaining_principal": round(remaining, 2),
+                "annual_rate": new_annual_rate,
+                "is_rate_changed": True,
+            })
+        else:
+            schedule.append({
+                "period_number": change_period + period - 1,
+                "due_date": due_dt.strftime("%Y-%m-%d"),
+                "payment_amount": round(payment, 2),
+                "principal_amount": round(principal_payment, 2),
+                "interest_amount": round(interest, 2),
+                "remaining_principal": round(remaining, 2),
+                "status": "pending",
+                "annual_rate": new_annual_rate,
+                "is_rate_changed": False,
+                "is_early_repayment": False,
+                "early_repayment_amount": 0.0,
+            })
+
+        if is_last_period:
+            break
+
+    return paid_schedule + schedule
+
+
+def apply_multiple_rate_changes(
+    original_schedule: List[Dict],
+    rate_changes: List[Dict],
+) -> List[Dict]:
+    sorted_changes = sorted(rate_changes, key=lambda x: x["change_period"])
+    current_schedule = [copy.deepcopy(item) for item in original_schedule]
+
+    for change in sorted_changes:
+        change_period = change["change_period"]
+        new_rate = change["new_annual_rate"]
+
+        if change_period <= 0 or change_period > len(current_schedule):
+            continue
+
+        found = False
+        for i, item in enumerate(current_schedule):
+            if item["period_number"] == change_period and item["status"] != "paid":
+                found = True
+                break
+
+        if not found:
+            continue
+
+        current_schedule = recalculate_schedule_after_rate_change(
+            current_schedule,
+            change_period,
+            new_rate,
+        )
+
+        for item in current_schedule:
+            if item["period_number"] >= change_period:
+                change_index = sorted_changes.index(change)
+                item["rate_change_index"] = change_index
+
+    return current_schedule
+
+
 def calculate_amortization_schedule(
     principal: float,
     annual_rate: float,
