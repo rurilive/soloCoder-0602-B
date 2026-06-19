@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Table,
   Button,
@@ -71,6 +71,9 @@ export default function LoanManagement({ currentLedger }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [form] = Form.useForm();
   const [earlyForm] = Form.useForm();
+
+  const previewDebounceRef = useRef(null);
+  const previewAbortRef = useRef(null);
 
   const expenseCategories = useMemo(
     () => categories.filter((c) => c.type === 'expense'),
@@ -172,6 +175,7 @@ export default function LoanManagement({ currentLedger }) {
         repayment_type: values.repayment_type || 'reduce_payment',
       });
       message.success('提前还款成功，还款计划已重算');
+      cancelPendingPreview();
       setEarlyRepaymentModalOpen(false);
       earlyForm.resetFields();
       setPreviewData(null);
@@ -208,11 +212,30 @@ export default function LoanManagement({ currentLedger }) {
     setCreateModalOpen(true);
   };
 
-  const fetchPreview = async (values) => {
+  const cancelPendingPreview = () => {
+    if (previewDebounceRef.current) {
+      clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+      previewAbortRef.current = null;
+    }
+  };
+
+  const doFetchPreview = useCallback(async (values) => {
     if (!selectedLoan || !values.period_number || !values.amount || values.amount <= 0) {
       setPreviewData(null);
+      setPreviewLoading(false);
       return;
     }
+
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    previewAbortRef.current = abortController;
+
     setPreviewLoading(true);
     try {
       const data = await loanApi.previewEarlyRepayment({
@@ -220,14 +243,28 @@ export default function LoanManagement({ currentLedger }) {
         period_number: values.period_number,
         amount: values.amount,
         repayment_type: values.repayment_type || 'reduce_payment',
-      });
+      }, abortController.signal);
+      if (abortController.signal.aborted) return;
       setPreviewData(data);
-    } catch {
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
       setPreviewData(null);
     } finally {
-      setPreviewLoading(false);
+      if (!abortController.signal.aborted) {
+        setPreviewLoading(false);
+      }
+      if (previewAbortRef.current === abortController) {
+        previewAbortRef.current = null;
+      }
     }
-  };
+  }, [selectedLoan]);
+
+  const fetchPreview = useCallback((values) => {
+    cancelPendingPreview();
+    previewDebounceRef.current = setTimeout(() => {
+      doFetchPreview(values);
+    }, 300);
+  }, [doFetchPreview]);
 
   const openEarlyRepaymentModal = () => {
     earlyForm.resetFields();
@@ -235,6 +272,7 @@ export default function LoanManagement({ currentLedger }) {
       repayment_type: 'reduce_payment',
     });
     setPreviewData(null);
+    cancelPendingPreview();
     setEarlyRepaymentModalOpen(true);
   };
 
@@ -803,6 +841,7 @@ export default function LoanManagement({ currentLedger }) {
         open={earlyRepaymentModalOpen}
         onOk={handleEarlyRepayment}
         onCancel={() => {
+          cancelPendingPreview();
           setEarlyRepaymentModalOpen(false);
           setPreviewData(null);
         }}
@@ -918,13 +957,13 @@ export default function LoanManagement({ currentLedger }) {
                       key: 'period_number',
                       width: 70,
                       render: (v, r) => {
-                        const origPaid = r.original_payment === 0;
-                        const newPaid = r.new_payment === 0;
-                        if (origPaid && !newPaid) {
+                        const isNewOnly = r.original_payment === 0 && r.new_payment > 0;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        if (isNewOnly) {
                           return <span style={{ color: '#52c41a' }}>第{v}期 <Tag color="green">新增</Tag></span>;
                         }
-                        if (!origPaid && newPaid) {
-                          return <span style={{ color: '#ff4d4f' }}>第{v}期 <Tag color="red">减少</Tag></span>;
+                        if (isRemoved) {
+                          return <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>第{v}期 <Tag color="red">减少</Tag></span>;
                         }
                         return `第${v}期`;
                       },
@@ -935,7 +974,15 @@ export default function LoanManagement({ currentLedger }) {
                       dataIndex: 'original_payment',
                       key: 'original_payment',
                       width: 100,
-                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                      render: (v, r) => {
+                        if (v <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <span style={isRemoved ? { color: '#ff4d4f', fontWeight: 'bold' } : {}}>
+                            {formatCurrency(v)}
+                          </span>
+                        );
+                      },
                     },
                     {
                       title: '新还款额',
@@ -944,7 +991,19 @@ export default function LoanManagement({ currentLedger }) {
                       width: 100,
                       render: (v, r) => {
                         const diff = r.payment_diff;
-                        const color = diff < 0 ? '#52c41a' : diff > 0 ? '#ff4d4f' : '#666';
+                        const isNewOnly = r.original_payment === 0 && r.new_payment > 0;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        if (isRemoved) {
+                          return (
+                            <Space direction="vertical" size={0}>
+                              <span style={{ color: '#999', textDecoration: 'line-through' }}>{formatCurrency(0)}</span>
+                              <span style={{ color: '#52c41a', fontSize: 11, fontWeight: 'bold' }}>
+                                节省 {formatCurrency(Math.abs(diff))}
+                              </span>
+                            </Space>
+                          );
+                        }
+                        const color = isNewOnly ? '#52c41a' : (diff < 0 ? '#52c41a' : diff > 0 ? '#ff4d4f' : '#666');
                         return (
                           <Space direction="vertical" size={0}>
                             <span style={{ color, fontWeight: 'bold' }}>{formatCurrency(v)}</span>
@@ -962,35 +1021,51 @@ export default function LoanManagement({ currentLedger }) {
                       dataIndex: 'original_principal',
                       key: 'original_principal',
                       width: 90,
-                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                      render: (v, r) => {
+                        if (v <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <span style={isRemoved ? { color: '#ff4d4f' } : {}}>
+                            {formatCurrency(v)}
+                          </span>
+                        );
+                      },
                     },
                     {
                       title: '新本金',
                       dataIndex: 'new_principal',
                       key: 'new_principal',
                       width: 90,
-                      render: (v) => formatCurrency(v),
+                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
                     },
                     {
                       title: '原利息',
                       dataIndex: 'original_interest',
                       key: 'original_interest',
                       width: 90,
-                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                      render: (v, r) => {
+                        if (v <= 0) return <span style={{ color: '#999' }}>-</span>;
+                        const isRemoved = r.original_payment > 0 && r.new_payment === 0;
+                        return (
+                          <span style={isRemoved ? { color: '#ff4d4f' } : {}}>
+                            {formatCurrency(v)}
+                          </span>
+                        );
+                      },
                     },
                     {
                       title: '新利息',
                       dataIndex: 'new_interest',
                       key: 'new_interest',
                       width: 90,
-                      render: (v) => formatCurrency(v),
+                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
                     },
                     {
                       title: '剩余本金',
                       dataIndex: 'new_remaining',
                       key: 'new_remaining',
                       width: 100,
-                      render: (v) => formatCurrency(v),
+                      render: (v, r) => v > 0 ? formatCurrency(v) : formatCurrency(r.original_remaining),
                     },
                   ]}
                 />

@@ -299,6 +299,20 @@ def preview_early_repayment(data: EarlyRepaymentPreviewRequest, db: Session = De
                 "original_remaining": 0,
                 "new_remaining": new["remaining_principal"],
             })
+        elif orig:
+            diff_schedule.append({
+                "period_number": orig["period_number"],
+                "due_date": orig["due_date"],
+                "original_payment": orig["payment_amount"],
+                "new_payment": 0,
+                "payment_diff": round(-orig["payment_amount"], 2),
+                "original_principal": orig["principal_amount"],
+                "new_principal": 0,
+                "original_interest": orig["interest_amount"],
+                "new_interest": 0,
+                "original_remaining": orig["remaining_principal"],
+                "new_remaining": 0,
+            })
 
     return {
         "original_schedule": original_remaining_schedule,

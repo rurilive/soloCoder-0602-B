@@ -12,3 +12,8 @@ dependencies = [
     "python-dateutil>=2.9.0",
     "python-multipart>=0.0.9",
 ]
+
+[dependency-groups]
+dev = [
+    "requests>=2.34.2",
+]

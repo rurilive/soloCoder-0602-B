@@ -1,9 +1,11 @@
 const BASE = '/api';
 
 async function request(url, options = {}) {
+  const { signal, ...restOptions } = options;
   const res = await fetch(BASE + url, {
     headers: { 'Content-Type': 'application/json' },
-    ...options,
+    signal,
+    ...restOptions,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -200,7 +202,7 @@ export const loanApi = {
   update: (id, data) => request(`/loans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => request(`/loans/${id}`, { method: 'DELETE' }),
   earlyRepayment: (data) => request('/loans/early-repayment', { method: 'POST', body: JSON.stringify(data) }),
-  previewEarlyRepayment: (data) => request('/loans/early-repayment/preview', { method: 'POST', body: JSON.stringify(data) }),
+  previewEarlyRepayment: (data, signal) => request('/loans/early-repayment/preview', { method: 'POST', body: JSON.stringify(data), signal }),
   generateTransaction: (loanId, scheduleId) => request(`/loans/${loanId}/generate-transaction/${scheduleId}`, { method: 'POST' }),
   generateOverdueTransactions: (loanId) => request(`/loans/${loanId}/generate-overdue-transactions`, { method: 'POST' }),
   getRemainingPrincipal: (id) => request(`/loans/${id}/remaining-principal`),
