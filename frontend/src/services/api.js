@@ -4,8 +4,8 @@ async function request(url, options = {}) {
   const { signal, ...restOptions } = options;
   const res = await fetch(BASE + url, {
     headers: { 'Content-Type': 'application/json' },
-    signal,
     ...restOptions,
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
