@@ -107,9 +107,9 @@ def recalculate_schedule_after_early_repayment(
     annual_rate: float,
     repayment_type: str = "reduce_term",
 ) -> List[Dict]:
-    paid_schedule = list(original_schedule[:early_repayment_period - 1])
+    paid_schedule = [dict(item) for item in original_schedule[:early_repayment_period - 1]]
 
-    target_period = original_schedule[early_repayment_period - 1]
+    target_period = dict(original_schedule[early_repayment_period - 1])
 
     remaining_principal = target_period["remaining_principal"] - early_repayment_amount
     if remaining_principal < 0:
