@@ -586,7 +586,44 @@ class EarlyRepaymentRequest(BaseModel):
     loan_id: int
     period_number: int
     amount: float
-    repayment_type: str = "reduce_term"
+    repayment_type: str = "reduce_payment"
+
+
+class EarlyRepaymentPreviewRequest(BaseModel):
+    loan_id: int
+    period_number: int
+    amount: float
+    repayment_type: str = "reduce_payment"
+
+
+class EarlyRepaymentScheduleDiff(BaseModel):
+    period_number: int
+    due_date: str
+    original_payment: float
+    new_payment: float
+    payment_diff: float
+    original_principal: float
+    new_principal: float
+    original_interest: float
+    new_interest: float
+    original_remaining: float
+    new_remaining: float
+
+
+class EarlyRepaymentPreviewResponse(BaseModel):
+    original_schedule: List[Dict]
+    new_schedule: List[Dict]
+    diff_schedule: List[EarlyRepaymentScheduleDiff]
+    original_total_payment: float
+    new_total_payment: float
+    original_total_interest: float
+    new_total_interest: float
+    payment_saved: float
+    interest_saved: float
+    original_remaining_periods: int
+    new_remaining_periods: int
+    original_monthly_payment: float
+    new_monthly_payment: float
 
 
 class LoanRemainingPrincipalPoint(BaseModel):

@@ -52,6 +52,11 @@ const statusLabels = {
   paid: '已还款',
 };
 
+const repaymentTypeOptions = [
+  { value: 'reduce_payment', label: '减少月供（期数不变）' },
+  { value: 'reduce_term', label: '缩短期限（月供不变）' },
+];
+
 export default function LoanManagement({ currentLedger }) {
   const [loans, setLoans] = useState([]);
   const [selectedLoan, setSelectedLoan] = useState(null);
@@ -62,6 +67,8 @@ export default function LoanManagement({ currentLedger }) {
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [remainingPrincipalData, setRemainingPrincipalData] = useState([]);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [form] = Form.useForm();
   const [earlyForm] = Form.useForm();
 
@@ -162,11 +169,12 @@ export default function LoanManagement({ currentLedger }) {
         loan_id: selectedLoan.id,
         period_number: values.period_number,
         amount: values.amount,
-        repayment_type: values.repayment_type || 'reduce_term',
+        repayment_type: values.repayment_type || 'reduce_payment',
       });
       message.success('提前还款成功，还款计划已重算');
       setEarlyRepaymentModalOpen(false);
       earlyForm.resetFields();
+      setPreviewData(null);
       setSelectedLoan(result);
       const curveData = await loanApi.getRemainingPrincipal(result.id);
       setRemainingPrincipalData(
@@ -200,11 +208,33 @@ export default function LoanManagement({ currentLedger }) {
     setCreateModalOpen(true);
   };
 
+  const fetchPreview = async (values) => {
+    if (!selectedLoan || !values.period_number || !values.amount || values.amount <= 0) {
+      setPreviewData(null);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const data = await loanApi.previewEarlyRepayment({
+        loan_id: selectedLoan.id,
+        period_number: values.period_number,
+        amount: values.amount,
+        repayment_type: values.repayment_type || 'reduce_payment',
+      });
+      setPreviewData(data);
+    } catch {
+      setPreviewData(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const openEarlyRepaymentModal = () => {
     earlyForm.resetFields();
     earlyForm.setFieldsValue({
-      repayment_type: 'reduce_term',
+      repayment_type: 'reduce_payment',
     });
+    setPreviewData(null);
     setEarlyRepaymentModalOpen(true);
   };
 
@@ -772,55 +802,224 @@ export default function LoanManagement({ currentLedger }) {
         title="提前还款"
         open={earlyRepaymentModalOpen}
         onOk={handleEarlyRepayment}
-        onCancel={() => setEarlyRepaymentModalOpen(false)}
+        onCancel={() => {
+          setEarlyRepaymentModalOpen(false);
+          setPreviewData(null);
+        }}
         destroyOnHidden
-        width={500}
+        width={900}
         okText="确认提前还款"
         cancelText="取消"
       >
-        <Form form={earlyForm} layout="vertical">
-          <Form.Item
-            name="period_number"
-            label="提前还款期次"
-            rules={[{ required: true, message: '请选择期次' }]}
-            tooltip="选择从第几期开始提前还款"
-          >
-            <Select
-              options={selectedLoan?.schedule
-                .filter((s) => s.status !== 'paid')
-                .map((s) => ({
-                  label: `第${s.period_number}期 (${s.due_date}) - 剩余本金: ${formatCurrency(s.remaining_principal)}`,
-                  value: s.period_number,
-                }))}
-              placeholder="请选择期次"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="amount"
-            label="提前还款金额"
-            rules={[{ required: true, message: '请输入提前还款金额' }]}
-          >
-            <InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix="¥" />
-          </Form.Item>
+        <Form
+          form={earlyForm}
+          layout="vertical"
+          onValuesChange={(_, allValues) => {
+            fetchPreview(allValues);
+          }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="period_number"
+                label="提前还款期次"
+                rules={[{ required: true, message: '请选择期次' }]}
+                tooltip="选择从第几期开始提前还款"
+              >
+                <Select
+                  options={selectedLoan?.schedule
+                    .filter((s) => s.status !== 'paid')
+                    .map((s) => ({
+                      label: `第${s.period_number}期 (${s.due_date}) - 剩余本金: ${formatCurrency(s.remaining_principal)}`,
+                      value: s.period_number,
+                    }))}
+                  placeholder="请选择期次"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="amount"
+                label="提前还款金额"
+                rules={[{ required: true, message: '请输入提前还款金额' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix="¥" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item
             name="repayment_type"
             label="还款方式"
-            initialValue="reduce_term"
-            tooltip="提前还款后，剩余还款计划保持期数不变"
+            initialValue="reduce_payment"
+            rules={[{ required: true, message: '请选择还款方式' }]}
           >
-            <Select
-              options={[
-                { value: 'reduce_term', label: '保持期数不变' },
-              ]}
-            />
+            <Select options={repaymentTypeOptions} />
           </Form.Item>
 
-          <Card size="small" type="inner" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
+          {previewData && (
+            <div>
+              <Divider orientation="left">还款计划对比</Divider>
+              <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={6}>
+                  <Card size="small" style={{ background: '#f5f5f5' }}>
+                    <Statistic
+                      title="原月供"
+                      value={previewData.original_monthly_payment}
+                      precision={2}
+                      prefix="¥"
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: '#e6f7ff', borderColor: '#91d5ff' }}>
+                    <Statistic
+                      title="新月供"
+                      value={previewData.new_monthly_payment}
+                      precision={2}
+                      prefix="¥"
+                      valueStyle={{ color: '#1890ff' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
+                    <Statistic
+                      title="节省利息"
+                      value={previewData.interest_saved}
+                      precision={2}
+                      prefix="¥"
+                      valueStyle={{ color: '#52c41a' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ background: '#fff7e6', borderColor: '#ffd591' }}>
+                    <Statistic
+                      title="剩余期数"
+                      value={previewData.new_remaining_periods}
+                      suffix={`期 (原${previewData.original_remaining_periods}期)`}
+                      valueStyle={{ color: '#fa8c16' }}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+
+              <Card size="small" title="还款计划对比明细" style={{ maxHeight: 400, overflow: 'auto' }}>
+                <Table
+                  dataSource={previewData.diff_schedule}
+                  rowKey="period_number"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    {
+                      title: '期次',
+                      dataIndex: 'period_number',
+                      key: 'period_number',
+                      width: 70,
+                      render: (v, r) => {
+                        const origPaid = r.original_payment === 0;
+                        const newPaid = r.new_payment === 0;
+                        if (origPaid && !newPaid) {
+                          return <span style={{ color: '#52c41a' }}>第{v}期 <Tag color="green">新增</Tag></span>;
+                        }
+                        if (!origPaid && newPaid) {
+                          return <span style={{ color: '#ff4d4f' }}>第{v}期 <Tag color="red">减少</Tag></span>;
+                        }
+                        return `第${v}期`;
+                      },
+                    },
+                    { title: '还款日', dataIndex: 'due_date', key: 'due_date', width: 100 },
+                    {
+                      title: '原还款额',
+                      dataIndex: 'original_payment',
+                      key: 'original_payment',
+                      width: 100,
+                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                    },
+                    {
+                      title: '新还款额',
+                      dataIndex: 'new_payment',
+                      key: 'new_payment',
+                      width: 100,
+                      render: (v, r) => {
+                        const diff = r.payment_diff;
+                        const color = diff < 0 ? '#52c41a' : diff > 0 ? '#ff4d4f' : '#666';
+                        return (
+                          <Space direction="vertical" size={0}>
+                            <span style={{ color, fontWeight: 'bold' }}>{formatCurrency(v)}</span>
+                            {diff !== 0 && (
+                              <span style={{ color, fontSize: 11 }}>
+                                {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                              </span>
+                            )}
+                          </Space>
+                        );
+                      },
+                    },
+                    {
+                      title: '原本金',
+                      dataIndex: 'original_principal',
+                      key: 'original_principal',
+                      width: 90,
+                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                    },
+                    {
+                      title: '新本金',
+                      dataIndex: 'new_principal',
+                      key: 'new_principal',
+                      width: 90,
+                      render: (v) => formatCurrency(v),
+                    },
+                    {
+                      title: '原利息',
+                      dataIndex: 'original_interest',
+                      key: 'original_interest',
+                      width: 90,
+                      render: (v) => v > 0 ? formatCurrency(v) : <span style={{ color: '#999' }}>-</span>,
+                    },
+                    {
+                      title: '新利息',
+                      dataIndex: 'new_interest',
+                      key: 'new_interest',
+                      width: 90,
+                      render: (v) => formatCurrency(v),
+                    },
+                    {
+                      title: '剩余本金',
+                      dataIndex: 'new_remaining',
+                      key: 'new_remaining',
+                      width: 100,
+                      render: (v) => formatCurrency(v),
+                    },
+                  ]}
+                />
+              </Card>
+            </div>
+          )}
+
+          {previewLoading && (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              正在计算还款计划...
+            </div>
+          )}
+
+          <Card
+            size="small"
+            type="inner"
+            style={{ background: '#fffbe6', borderColor: '#ffe58f', marginTop: 16 }}
+          >
             <p style={{ margin: 0, color: '#d48806' }}>
               <InfoCircleOutlined style={{ marginRight: 6 }} />
               提前还款后，系统将从指定月份起重新计算剩余还款计划。已还款部分不受影响。
+              {previewData && (
+                <span>
+                  <br />
+                  <strong>本次提前还款</strong>：{formatCurrency(previewData.new_schedule[0]?.early_repayment_amount || 0)}，
+                  <strong>节省总利息</strong>：{formatCurrency(previewData.interest_saved)}，
+                  <strong>减少总还款</strong>：{formatCurrency(previewData.payment_saved)}
+                </span>
+              )}
             </p>
           </Card>
         </Form>

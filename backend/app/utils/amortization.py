@@ -100,13 +100,140 @@ def calculate_equal_payment(
     return schedule, round(total_interest, 2), round(total_payment, 2)
 
 
+def calculate_reduce_payment_schedule(
+    remaining_principal: float,
+    annual_rate: float,
+    remaining_periods: int,
+    start_date: str,
+    repayment_day: int,
+    early_repayment_period: int,
+) -> List[Dict]:
+    monthly_rate = annual_rate / 100 / 12
+
+    if monthly_rate == 0:
+        new_monthly_payment = remaining_principal / remaining_periods
+    else:
+        new_monthly_payment = (remaining_principal * monthly_rate) / (1 - (1 + monthly_rate) ** (-remaining_periods))
+
+    new_monthly_payment = round(new_monthly_payment, 2)
+
+    remaining = remaining_principal
+    schedule = []
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+
+    for i in range(remaining_periods):
+        period = i + 1
+        interest = remaining * monthly_rate
+        interest = round(interest, 2)
+
+        is_last_period = (i == remaining_periods - 1)
+
+        if is_last_period:
+            principal_payment = remaining
+            payment = principal_payment + interest
+        else:
+            if new_monthly_payment < interest:
+                payment = interest
+                principal_payment = 0
+            else:
+                payment = new_monthly_payment
+                principal_payment = payment - interest
+
+        remaining -= principal_payment
+
+        due_dt = start_dt + relativedelta(months=period)
+        try:
+            due_dt = due_dt.replace(day=repayment_day)
+        except ValueError:
+            due_dt = due_dt + relativedelta(day=repayment_day)
+
+        if remaining < 0.01:
+            remaining = 0.0
+
+        schedule.append({
+            "period_number": early_repayment_period + period,
+            "due_date": due_dt.strftime("%Y-%m-%d"),
+            "payment_amount": round(payment, 2),
+            "principal_amount": round(principal_payment, 2),
+            "interest_amount": round(interest, 2),
+            "remaining_principal": round(remaining, 2),
+            "status": "pending",
+        })
+
+    return schedule
+
+
+def calculate_reduce_term_schedule(
+    remaining_principal: float,
+    annual_rate: float,
+    original_monthly_payment: float,
+    start_date: str,
+    repayment_day: int,
+    early_repayment_period: int,
+    max_remaining_periods: int,
+) -> List[Dict]:
+    monthly_rate = annual_rate / 100 / 12
+
+    remaining = remaining_principal
+    schedule = []
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+
+    period = 1
+    while remaining > 0.01 and period <= max_remaining_periods:
+        interest = remaining * monthly_rate
+        interest = round(interest, 2)
+
+        is_last_period = (remaining + interest) <= original_monthly_payment + 0.01
+
+        if is_last_period:
+            principal_payment = remaining
+            payment = principal_payment + interest
+        else:
+            if original_monthly_payment < interest:
+                payment = interest
+                principal_payment = 0
+            else:
+                payment = original_monthly_payment
+                principal_payment = payment - interest
+
+        remaining -= principal_payment
+
+        due_dt = start_dt + relativedelta(months=period)
+        try:
+            due_dt = due_dt.replace(day=repayment_day)
+        except ValueError:
+            due_dt = due_dt + relativedelta(day=repayment_day)
+
+        if remaining < 0.01:
+            remaining = 0.0
+
+        schedule.append({
+            "period_number": early_repayment_period + period,
+            "due_date": due_dt.strftime("%Y-%m-%d"),
+            "payment_amount": round(payment, 2),
+            "principal_amount": round(principal_payment, 2),
+            "interest_amount": round(interest, 2),
+            "remaining_principal": round(remaining, 2),
+            "status": "pending",
+        })
+
+        if is_last_period:
+            break
+
+        period += 1
+
+    return schedule
+
+
 def recalculate_schedule_after_early_repayment(
     original_schedule: List[Dict],
     early_repayment_period: int,
     early_repayment_amount: float,
     amortization_type: str,
     annual_rate: float,
-    repayment_type: str = "reduce_term",
+    repayment_type: str = "reduce_payment",
 ) -> List[Dict]:
     paid_schedule = [copy.deepcopy(item) for item in original_schedule[:early_repayment_period - 1]]
 
@@ -117,6 +244,8 @@ def recalculate_schedule_after_early_repayment(
         remaining_principal = 0
 
     remaining_periods = len(original_schedule) - early_repayment_period
+    original_monthly_payment = target_period["payment_amount"]
+
     paid_schedule.append({
         **target_period,
         "payment_amount": round(target_period["payment_amount"] + early_repayment_amount, 2),
@@ -133,26 +262,46 @@ def recalculate_schedule_after_early_repayment(
     start_date = last_paid_dt.strftime("%Y-%m-%d")
     repayment_day = last_paid_dt.day
 
-    if amortization_type == "equal_principal":
-        new_schedule, _, _ = calculate_equal_principal(
-            principal=remaining_principal,
+    if repayment_type == "reduce_payment":
+        new_schedule = calculate_reduce_payment_schedule(
+            remaining_principal=remaining_principal,
             annual_rate=annual_rate,
-            term_months=remaining_periods,
+            remaining_periods=remaining_periods,
             start_date=start_date,
             repayment_day=repayment_day,
+            early_repayment_period=early_repayment_period,
+        )
+    elif repayment_type == "reduce_term":
+        new_schedule = calculate_reduce_term_schedule(
+            remaining_principal=remaining_principal,
+            annual_rate=annual_rate,
+            original_monthly_payment=original_monthly_payment,
+            start_date=start_date,
+            repayment_day=repayment_day,
+            early_repayment_period=early_repayment_period,
+            max_remaining_periods=remaining_periods,
         )
     else:
-        new_schedule, _, _ = calculate_equal_payment(
-            principal=remaining_principal,
-            annual_rate=annual_rate,
-            term_months=remaining_periods,
-            start_date=start_date,
-            repayment_day=repayment_day,
-        )
+        if amortization_type == "equal_principal":
+            new_schedule, _, _ = calculate_equal_principal(
+                principal=remaining_principal,
+                annual_rate=annual_rate,
+                term_months=remaining_periods,
+                start_date=start_date,
+                repayment_day=repayment_day,
+            )
+        else:
+            new_schedule, _, _ = calculate_equal_payment(
+                principal=remaining_principal,
+                annual_rate=annual_rate,
+                term_months=remaining_periods,
+                start_date=start_date,
+                repayment_day=repayment_day,
+            )
 
-    for i, item in enumerate(new_schedule):
-        item["period_number"] = early_repayment_period + i + 1
-        item["status"] = "pending"
+        for i, item in enumerate(new_schedule):
+            item["period_number"] = early_repayment_period + i + 1
+            item["status"] = "pending"
 
     return paid_schedule + new_schedule
 

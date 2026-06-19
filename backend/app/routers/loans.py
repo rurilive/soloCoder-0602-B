@@ -12,6 +12,8 @@ from app.schemas import (
     LoanWithSchedule,
     LoanRepaymentScheduleOut,
     EarlyRepaymentRequest,
+    EarlyRepaymentPreviewRequest,
+    EarlyRepaymentPreviewResponse,
     LoanRemainingPrincipalPoint,
 )
 from app.utils.amortization import (
@@ -197,6 +199,124 @@ def delete_loan(loan_id: int, db: Session = Depends(get_db)):
     return {"message": "删除成功"}
 
 
+@router.post("/early-repayment/preview", response_model=EarlyRepaymentPreviewResponse)
+def preview_early_repayment(data: EarlyRepaymentPreviewRequest, db: Session = Depends(get_db)):
+    loan = db.query(Loan).filter(Loan.id == data.loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="贷款不存在")
+
+    if data.repayment_type not in ["reduce_payment", "reduce_term"]:
+        raise HTTPException(status_code=400, detail="还款方式必须是 reduce_payment 或 reduce_term")
+
+    schedules = db.query(LoanRepaymentSchedule).filter(
+        LoanRepaymentSchedule.loan_id == data.loan_id
+    ).order_by(LoanRepaymentSchedule.period_number).all()
+
+    if data.period_number < 1 or data.period_number > len(schedules):
+        raise HTTPException(status_code=400, detail="提前还款期次无效")
+
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="提前还款金额必须大于0")
+
+    target_schedule = schedules[data.period_number - 1]
+
+    if data.amount > target_schedule.remaining_principal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"提前还款金额不能超过剩余本金 {target_schedule.remaining_principal}",
+        )
+
+    schedule_dicts = [
+        {
+            "period_number": s.period_number,
+            "due_date": s.due_date,
+            "payment_amount": s.payment_amount,
+            "principal_amount": s.principal_amount,
+            "interest_amount": s.interest_amount,
+            "remaining_principal": s.remaining_principal,
+            "status": s.status,
+            "is_early_repayment": s.is_early_repayment,
+            "early_repayment_amount": s.early_repayment_amount,
+        }
+        for s in schedules
+    ]
+
+    original_remaining_schedule = schedule_dicts[data.period_number - 1:]
+    original_total_payment = sum(item["payment_amount"] for item in original_remaining_schedule)
+    original_total_interest = sum(item["interest_amount"] for item in original_remaining_schedule)
+    original_monthly_payment = target_schedule.payment_amount
+    original_remaining_periods = len(original_remaining_schedule)
+
+    new_schedule = recalculate_schedule_after_early_repayment(
+        original_schedule=schedule_dicts,
+        early_repayment_period=data.period_number,
+        early_repayment_amount=data.amount,
+        amortization_type=loan.amortization_type,
+        annual_rate=loan.annual_rate,
+        repayment_type=data.repayment_type,
+    )
+
+    new_remaining_schedule = new_schedule[data.period_number - 1:]
+    new_total_payment = sum(item["payment_amount"] for item in new_remaining_schedule)
+    new_total_interest = sum(item["interest_amount"] for item in new_remaining_schedule)
+    new_remaining_periods = len(new_remaining_schedule)
+
+    new_monthly_payment = 0
+    if len(new_remaining_schedule) > 1:
+        new_monthly_payment = new_remaining_schedule[1]["payment_amount"]
+
+    diff_schedule = []
+    max_len = max(len(original_remaining_schedule), len(new_remaining_schedule))
+    for i in range(max_len):
+        orig = original_remaining_schedule[i] if i < len(original_remaining_schedule) else None
+        new = new_remaining_schedule[i] if i < len(new_remaining_schedule) else None
+
+        if orig and new:
+            diff_schedule.append({
+                "period_number": new["period_number"],
+                "due_date": new["due_date"],
+                "original_payment": orig["payment_amount"],
+                "new_payment": new["payment_amount"],
+                "payment_diff": round(new["payment_amount"] - orig["payment_amount"], 2),
+                "original_principal": orig["principal_amount"],
+                "new_principal": new["principal_amount"],
+                "original_interest": orig["interest_amount"],
+                "new_interest": new["interest_amount"],
+                "original_remaining": orig["remaining_principal"],
+                "new_remaining": new["remaining_principal"],
+            })
+        elif new:
+            diff_schedule.append({
+                "period_number": new["period_number"],
+                "due_date": new["due_date"],
+                "original_payment": 0,
+                "new_payment": new["payment_amount"],
+                "payment_diff": new["payment_amount"],
+                "original_principal": 0,
+                "new_principal": new["principal_amount"],
+                "original_interest": 0,
+                "new_interest": new["interest_amount"],
+                "original_remaining": 0,
+                "new_remaining": new["remaining_principal"],
+            })
+
+    return {
+        "original_schedule": original_remaining_schedule,
+        "new_schedule": new_remaining_schedule,
+        "diff_schedule": diff_schedule,
+        "original_total_payment": round(original_total_payment, 2),
+        "new_total_payment": round(new_total_payment, 2),
+        "original_total_interest": round(original_total_interest, 2),
+        "new_total_interest": round(new_total_interest, 2),
+        "payment_saved": round(original_total_payment - new_total_payment, 2),
+        "interest_saved": round(original_total_interest - new_total_interest, 2),
+        "original_remaining_periods": original_remaining_periods,
+        "new_remaining_periods": new_remaining_periods,
+        "original_monthly_payment": round(original_monthly_payment, 2),
+        "new_monthly_payment": round(new_monthly_payment, 2),
+    }
+
+
 @router.post("/early-repayment", response_model=LoanWithSchedule)
 def early_repayment(data: EarlyRepaymentRequest, db: Session = Depends(get_db)):
     loan = db.query(Loan).filter(Loan.id == data.loan_id).first()
@@ -205,6 +325,9 @@ def early_repayment(data: EarlyRepaymentRequest, db: Session = Depends(get_db)):
 
     if loan.status != "active":
         raise HTTPException(status_code=400, detail="贷款状态不是活跃状态")
+
+    if data.repayment_type not in ["reduce_payment", "reduce_term"]:
+        raise HTTPException(status_code=400, detail="还款方式必须是 reduce_payment 或 reduce_term")
 
     schedules = db.query(LoanRepaymentSchedule).filter(
         LoanRepaymentSchedule.loan_id == data.loan_id
