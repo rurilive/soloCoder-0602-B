@@ -310,12 +310,13 @@ def recalculate_schedule_after_rate_change(
     original_schedule: List[Dict],
     change_period: int,
     new_annual_rate: float,
+    standard_monthly_payment: float,
 ) -> List[Dict]:
     paid_schedule = [copy.deepcopy(item) for item in original_schedule[:change_period - 1]]
 
     target_period = copy.deepcopy(original_schedule[change_period - 1])
     remaining_principal = target_period["remaining_principal"]
-    original_monthly_payment = target_period["payment_amount"]
+    original_monthly_payment = standard_monthly_payment
 
     if remaining_principal <= 0.01:
         return original_schedule
@@ -392,9 +393,12 @@ def recalculate_schedule_after_rate_change(
 def apply_multiple_rate_changes(
     original_schedule: List[Dict],
     rate_changes: List[Dict],
+    standard_monthly_payment: float,
 ) -> List[Dict]:
     sorted_changes = sorted(rate_changes, key=lambda x: x["change_period"])
     current_schedule = [copy.deepcopy(item) for item in original_schedule]
+
+    effective_change_periods = []
 
     for change in sorted_changes:
         change_period = change["change_period"]
@@ -416,12 +420,28 @@ def apply_multiple_rate_changes(
             current_schedule,
             change_period,
             new_rate,
+            standard_monthly_payment,
         )
 
-        for item in current_schedule:
-            if item["period_number"] >= change_period:
-                change_index = sorted_changes.index(change)
-                item["rate_change_index"] = change_index
+        effective_change_periods.append(change_period)
+
+    for idx, item in enumerate(current_schedule):
+        period_num = item["period_number"]
+        assigned_index = None
+
+        for i in range(len(effective_change_periods)):
+            current_start = effective_change_periods[i]
+            next_start = (
+                effective_change_periods[i + 1]
+                if i + 1 < len(effective_change_periods)
+                else float("inf")
+            )
+            if current_start <= period_num < next_start:
+                assigned_index = i
+                break
+
+        if assigned_index is not None:
+            item["rate_change_index"] = assigned_index
 
     return current_schedule
 

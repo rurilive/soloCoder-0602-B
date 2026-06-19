@@ -669,9 +669,22 @@ def simulate_rate_change(data: RateChangeSimulationRequest, db: Session = Depend
         for c in data.rate_changes
     ]
 
+    if loan.amortization_type == "equal_payment":
+        monthly_rate = loan.annual_rate / 100 / 12
+        if monthly_rate == 0:
+            standard_monthly_payment = loan.principal / loan.term_months
+        else:
+            standard_monthly_payment = (
+                loan.principal * monthly_rate
+            ) / (1 - (1 + monthly_rate) ** (-loan.term_months))
+        standard_monthly_payment = round(standard_monthly_payment, 2)
+    else:
+        standard_monthly_payment = schedule_dicts[0]["payment_amount"] if schedule_dicts else 0.0
+
     new_schedule = apply_multiple_rate_changes(
         original_schedule=schedule_dicts,
         rate_changes=rate_changes_list,
+        standard_monthly_payment=standard_monthly_payment,
     )
 
     original_total_payment = sum(item["payment_amount"] for item in original_schedule)
