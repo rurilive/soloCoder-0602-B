@@ -200,6 +200,11 @@ class InvestmentTransaction(Base):
     dividend_amount = Column(Float, nullable=True)
     reinvest = Column(Boolean, default=False)
     realized_gain = Column(Float, default=0.0)
+    taxable_gain_short = Column(Float, default=0.0)
+    taxable_gain_long = Column(Float, default=0.0)
+    tax_amount_capital = Column(Float, default=0.0)
+    dividend_tax = Column(Float, default=0.0)
+    dividend_after_tax = Column(Float, nullable=True)
     description = Column(Text, default="")
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
@@ -218,5 +223,26 @@ class InvestmentLot(Base):
     original_quantity = Column(Float, nullable=False)
     buy_date = Column(String(10), nullable=False)
     is_closed = Column(Boolean, default=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TaxLotSale(Base):
+    __tablename__ = "tax_lot_sales"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sell_transaction_id = Column(Integer, ForeignKey("investment_transactions.id"), nullable=False)
+    lot_id = Column(Integer, ForeignKey("investment_lots.id"), nullable=False)
+    security_id = Column(Integer, ForeignKey("investment_securities.id"), nullable=False)
+    quantity_sold = Column(Float, nullable=False)
+    cost_basis_per_share = Column(Float, nullable=False)
+    cost_sold = Column(Float, nullable=False)
+    proceeds_per_share = Column(Float, nullable=False)
+    proceeds_sold = Column(Float, nullable=False)
+    gain = Column(Float, nullable=False)
+    holding_days = Column(Integer, nullable=False)
+    gain_type = Column(String(10), nullable=False)
+    buy_date = Column(String(10), nullable=False)
+    sell_date = Column(String(10), nullable=False)
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())

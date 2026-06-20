@@ -11,6 +11,7 @@ from app.models import (
     InvestmentSecurity,
     InvestmentTransaction,
     InvestmentLot,
+    TaxLotSale,
 )
 from app.schemas import (
     InvestmentSecurityCreate,
@@ -23,6 +24,11 @@ from app.schemas import (
     InvestmentLotOut,
     PortfolioHistoryResponse,
     PortfolioHistoryPoint,
+    TaxSummaryResponse,
+    TaxDetailsResponse,
+    TaxDetailItem,
+    TaxDetailLotItem,
+    MonthlyTaxCalendarItem,
 )
 from app.exchange_rate import convert_amount
 
@@ -81,6 +87,12 @@ def _create_buy_lot(db: Session, tx: InvestmentTransaction, security_id: int, le
     db.flush()
 
 
+SHORT_TERM_RATE = 0.20
+LONG_TERM_RATE = 0.10
+DIVIDEND_TAX_RATE = 0.20
+HOLDING_THRESHOLD_DAYS = 365
+
+
 def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_id: int):
     qty_needed = tx.quantity
     if qty_needed <= 0:
@@ -107,6 +119,10 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
 
     total_cost_sold = 0.0
     remaining_qty = qty_needed
+    short_gain = 0.0
+    long_gain = 0.0
+    sell_date = datetime.strptime(tx.date, "%Y-%m-%d").date()
+    proceeds_per_share = (tx.amount - tx.fee) / tx.quantity if tx.quantity > 0 else 0.0
 
     for lot in open_lots:
         if remaining_qty <= 1e-9:
@@ -114,6 +130,36 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
         sell_from_lot = min(lot.quantity_remaining, remaining_qty)
         cost_sold = sell_from_lot * lot.cost_basis_per_share
         total_cost_sold += cost_sold
+        proceeds_sold = sell_from_lot * proceeds_per_share
+        lot_gain = proceeds_sold - cost_sold
+
+        buy_date = datetime.strptime(lot.buy_date, "%Y-%m-%d").date()
+        holding_days = (sell_date - buy_date).days
+        gain_type = "short" if holding_days <= HOLDING_THRESHOLD_DAYS else "long"
+
+        if gain_type == "short":
+            short_gain += lot_gain
+        else:
+            long_gain += lot_gain
+
+        tax_lot_sale = TaxLotSale(
+            sell_transaction_id=tx.id,
+            lot_id=lot.id,
+            security_id=security_id,
+            quantity_sold=sell_from_lot,
+            cost_basis_per_share=lot.cost_basis_per_share,
+            cost_sold=_round2(cost_sold),
+            proceeds_per_share=_round2(proceeds_per_share),
+            proceeds_sold=_round2(proceeds_sold),
+            gain=_round2(lot_gain),
+            holding_days=holding_days,
+            gain_type=gain_type,
+            buy_date=lot.buy_date,
+            sell_date=tx.date,
+            ledger_id=ledger_id,
+        )
+        db.add(tax_lot_sale)
+
         lot.quantity_remaining -= sell_from_lot
         if lot.quantity_remaining <= 1e-9:
             lot.quantity_remaining = 0.0
@@ -122,7 +168,23 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
 
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - total_cost_sold
+
+    net_short = short_gain
+    net_long = long_gain
+    taxable_short = max(0.0, net_short)
+    taxable_long = max(0.0, net_long)
+    if net_short < 0:
+        taxable_long = max(0.0, net_long + net_short)
+    if net_long < 0 and net_short > 0:
+        taxable_short = max(0.0, net_short + net_long)
+
+    tax_short = taxable_short * SHORT_TERM_RATE
+    tax_long = taxable_long * LONG_TERM_RATE
+
     tx.realized_gain = _round2(realized_gain)
+    tx.taxable_gain_short = _round2(taxable_short)
+    tx.taxable_gain_long = _round2(taxable_long)
+    tx.tax_amount_capital = _round2(tax_short + tax_long)
     db.flush()
 
 
@@ -154,10 +216,46 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
     cost_sold = qty_needed * avg_cost
 
     remaining_qty = qty_needed
+    short_gain = 0.0
+    long_gain = 0.0
+    sell_date = datetime.strptime(tx.date, "%Y-%m-%d").date()
+    proceeds_per_share = (tx.amount - tx.fee) / tx.quantity if tx.quantity > 0 else 0.0
+
     for lot in sorted(open_lots, key=lambda l: (l.buy_date, l.id)):
         if remaining_qty <= 1e-9:
             break
         sell_from_lot = min(lot.quantity_remaining, remaining_qty)
+        lot_cost = sell_from_lot * lot.cost_basis_per_share
+        lot_proceeds = sell_from_lot * proceeds_per_share
+        lot_gain = lot_proceeds - lot_cost
+
+        buy_date = datetime.strptime(lot.buy_date, "%Y-%m-%d").date()
+        holding_days = (sell_date - buy_date).days
+        gain_type = "short" if holding_days <= HOLDING_THRESHOLD_DAYS else "long"
+
+        if gain_type == "short":
+            short_gain += lot_gain
+        else:
+            long_gain += lot_gain
+
+        tax_lot_sale = TaxLotSale(
+            sell_transaction_id=tx.id,
+            lot_id=lot.id,
+            security_id=security_id,
+            quantity_sold=sell_from_lot,
+            cost_basis_per_share=lot.cost_basis_per_share,
+            cost_sold=_round2(lot_cost),
+            proceeds_per_share=_round2(proceeds_per_share),
+            proceeds_sold=_round2(lot_proceeds),
+            gain=_round2(lot_gain),
+            holding_days=holding_days,
+            gain_type=gain_type,
+            buy_date=lot.buy_date,
+            sell_date=tx.date,
+            ledger_id=ledger_id,
+        )
+        db.add(tax_lot_sale)
+
         lot.quantity_remaining -= sell_from_lot
         if lot.quantity_remaining <= 1e-9:
             lot.quantity_remaining = 0.0
@@ -187,7 +285,23 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
 
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - cost_sold
+
+    net_short = short_gain
+    net_long = long_gain
+    taxable_short = max(0.0, net_short)
+    taxable_long = max(0.0, net_long)
+    if net_short < 0:
+        taxable_long = max(0.0, net_long + net_short)
+    if net_long < 0 and net_short > 0:
+        taxable_short = max(0.0, net_short + net_long)
+
+    tax_short = taxable_short * SHORT_TERM_RATE
+    tax_long = taxable_long * LONG_TERM_RATE
+
     tx.realized_gain = _round2(realized_gain)
+    tx.taxable_gain_short = _round2(taxable_short)
+    tx.taxable_gain_long = _round2(taxable_long)
+    tx.tax_amount_capital = _round2(tax_short + tax_long)
     db.flush()
 
 
@@ -221,21 +335,27 @@ def _process_dividend(db: Session, tx: InvestmentTransaction, security_id: int, 
     if tx.dividend_amount <= 0:
         raise HTTPException(status_code=400, detail="分红金额必须大于0")
 
+    div_tax = _round2(tx.dividend_amount * DIVIDEND_TAX_RATE)
+    div_after_tax = _round2(tx.dividend_amount - div_tax)
+    tx.dividend_tax = div_tax
+    tx.dividend_after_tax = div_after_tax
+    tx.amount = _round2(tx.dividend_amount)
+
     if tx.reinvest:
         if tx.price <= 0 or tx.quantity <= 0:
             raise HTTPException(status_code=400, detail="分红再投资需要提供价格和数量")
-        reinvest_amount = tx.dividend_amount
-        tx.amount = reinvest_amount
+        reinvest_amount = div_after_tax
+        actual_qty = reinvest_amount / tx.price if tx.price > 0 else 0
 
         reinvest_tx = InvestmentTransaction(
             security_id=security_id,
             type="buy",
-            quantity=tx.quantity,
+            quantity=actual_qty,
             price=tx.price,
             amount=reinvest_amount,
             fee=0.0,
             date=tx.date,
-            description=f"分红再投资 - {tx.description}",
+            description=f"分红再投资(税后净额) - {tx.description}",
             ledger_id=ledger_id,
             account_id=tx.account_id,
             linked_transaction_id=tx.id,
@@ -355,6 +475,10 @@ def create_transaction(data: InvestmentTransactionCreate, db: Session = Depends(
 
     tx_data["amount"] = amount
     tx_data["realized_gain"] = 0.0
+    tx_data["taxable_gain_short"] = 0.0
+    tx_data["taxable_gain_long"] = 0.0
+    tx_data["tax_amount_capital"] = 0.0
+    tx_data["dividend_tax"] = 0.0
     tx = InvestmentTransaction(**tx_data)
     db.add(tx)
     db.flush()
@@ -641,3 +765,206 @@ def get_lots_for_security(
         .all()
     )
     return lots
+
+
+@router.get("/tax/summary", response_model=TaxSummaryResponse)
+def get_tax_summary(
+    ledger_id: int = Query(...),
+    year: int = Query(None, ge=1970, le=9999),
+    db: Session = Depends(get_db),
+):
+    _validate_ledger(db, ledger_id)
+    if year is None:
+        year = datetime.now().year
+
+    year_start = f"{year}-01-01"
+    year_end = f"{year + 1}-01-01"
+
+    sell_txs = (
+        db.query(InvestmentTransaction)
+        .filter(
+            InvestmentTransaction.ledger_id == ledger_id,
+            InvestmentTransaction.type == "sell",
+            InvestmentTransaction.date >= year_start,
+            InvestmentTransaction.date < year_end,
+        )
+        .all()
+    )
+
+    short_gain_total = sum(tx.taxable_gain_short for tx in sell_txs)
+    short_tax = short_gain_total * SHORT_TERM_RATE
+    long_gain_total = sum(tx.taxable_gain_long for tx in sell_txs)
+    long_tax = long_gain_total * LONG_TERM_RATE
+
+    short_cost_total = 0.0
+    short_proceeds_total = 0.0
+    long_cost_total = 0.0
+    long_proceeds_total = 0.0
+
+    tax_lot_sales = (
+        db.query(TaxLotSale)
+        .filter(
+            TaxLotSale.ledger_id == ledger_id,
+            TaxLotSale.sell_date >= year_start,
+            TaxLotSale.sell_date < year_end,
+        )
+        .all()
+    )
+
+    for tls in tax_lot_sales:
+        if tls.gain_type == "short":
+            short_cost_total += tls.cost_sold
+            short_proceeds_total += tls.proceeds_sold
+        else:
+            long_cost_total += tls.cost_sold
+            long_proceeds_total += tls.proceeds_sold
+
+    div_txs = (
+        db.query(InvestmentTransaction)
+        .filter(
+            InvestmentTransaction.ledger_id == ledger_id,
+            InvestmentTransaction.type == "dividend",
+            InvestmentTransaction.date >= year_start,
+            InvestmentTransaction.date < year_end,
+        )
+        .all()
+    )
+
+    dividend_income_total = sum(tx.dividend_amount or 0.0 for tx in div_txs)
+    dividend_tax_total = sum(tx.dividend_tax for tx in div_txs)
+    total_capital_tax = _round2(short_tax + long_tax)
+    total_tax = _round2(total_capital_tax + dividend_tax_total)
+
+    net_income = short_gain_total + long_gain_total + dividend_income_total
+    effective_tax_rate = _round2((total_tax / net_income * 100) if net_income > 0 else 0.0)
+
+    monthly_calendar = []
+    for m in range(1, 13):
+        m_start = f"{year}-{m:02d}-01"
+        if m == 12:
+            m_end = f"{year + 1}-01-01"
+        else:
+            m_end = f"{year}-{m + 1:02d}-01"
+
+        m_sell_txs = [tx for tx in sell_txs if m_start <= tx.date < m_end]
+        m_div_txs = [tx for tx in div_txs if m_start <= tx.date < m_end]
+
+        m_short = sum(tx.taxable_gain_short for tx in m_sell_txs)
+        m_long = sum(tx.taxable_gain_long for tx in m_sell_txs)
+        m_div_income = sum(tx.dividend_amount or 0.0 for tx in m_div_txs)
+        m_div_tax = sum(tx.dividend_tax for tx in m_div_txs)
+        m_cap_tax = _round2(m_short * SHORT_TERM_RATE + m_long * LONG_TERM_RATE)
+
+        monthly_calendar.append(MonthlyTaxCalendarItem(
+            year=year,
+            month=m,
+            short_gain=_round2(m_short),
+            long_gain=_round2(m_long),
+            dividend_income=_round2(m_div_income),
+            dividend_tax=_round2(m_div_tax),
+            capital_tax=m_cap_tax,
+            total_tax=_round2(m_cap_tax + m_div_tax),
+        ))
+
+    return TaxSummaryResponse(
+        ledger_id=ledger_id,
+        year=year,
+        short_gain_total=_round2(short_gain_total),
+        short_cost_total=_round2(short_cost_total),
+        short_proceeds_total=_round2(short_proceeds_total),
+        short_tax=_round2(short_tax),
+        long_gain_total=_round2(long_gain_total),
+        long_cost_total=_round2(long_cost_total),
+        long_proceeds_total=_round2(long_proceeds_total),
+        long_tax=_round2(long_tax),
+        dividend_income_total=_round2(dividend_income_total),
+        dividend_tax_total=_round2(dividend_tax_total),
+        total_capital_tax=total_capital_tax,
+        total_tax=total_tax,
+        effective_tax_rate=effective_tax_rate,
+        monthly_calendar=monthly_calendar,
+    )
+
+
+@router.get("/tax/details", response_model=TaxDetailsResponse)
+def get_tax_details(
+    ledger_id: int = Query(...),
+    year: int = Query(None, ge=1970, le=9999),
+    db: Session = Depends(get_db),
+):
+    _validate_ledger(db, ledger_id)
+    if year is None:
+        year = datetime.now().year
+
+    year_start = f"{year}-01-01"
+    year_end = f"{year + 1}-01-01"
+
+    sell_txs = (
+        db.query(InvestmentTransaction)
+        .filter(
+            InvestmentTransaction.ledger_id == ledger_id,
+            InvestmentTransaction.type == "sell",
+            InvestmentTransaction.date >= year_start,
+            InvestmentTransaction.date < year_end,
+        )
+        .order_by(InvestmentTransaction.date.asc(), InvestmentTransaction.id.asc())
+        .all()
+    )
+
+    sec_map = {}
+    all_sec = db.query(InvestmentSecurity).filter(InvestmentSecurity.ledger_id == ledger_id).all()
+    for sec in all_sec:
+        sec_map[sec.id] = sec
+
+    details = []
+    for tx in sell_txs:
+        sec = sec_map.get(tx.security_id)
+        symbol = sec.symbol if sec else ""
+        name = sec.name if sec else ""
+
+        lot_sales = (
+            db.query(TaxLotSale)
+            .filter(TaxLotSale.sell_transaction_id == tx.id)
+            .order_by(TaxLotSale.holding_days.asc())
+            .all()
+        )
+
+        lot_items = []
+        for tls in lot_sales:
+            lot_items.append(TaxDetailLotItem(
+                lot_id=tls.lot_id,
+                buy_date=tls.buy_date,
+                sell_date=tls.sell_date,
+                holding_days=tls.holding_days,
+                gain_type=tls.gain_type,
+                quantity_sold=tls.quantity_sold,
+                cost_sold=tls.cost_sold,
+                proceeds_sold=tls.proceeds_sold,
+                gain=tls.gain,
+            ))
+
+        proceeds = tx.amount - tx.fee
+        total_cost = proceeds - tx.realized_gain
+
+        details.append(TaxDetailItem(
+            transaction_id=tx.id,
+            date=tx.date,
+            security_id=tx.security_id,
+            symbol=symbol,
+            name=name,
+            sell_quantity=tx.quantity,
+            sell_price=tx.price,
+            proceeds=_round2(proceeds),
+            total_cost=_round2(total_cost),
+            realized_gain=tx.realized_gain,
+            taxable_gain_short=tx.taxable_gain_short,
+            taxable_gain_long=tx.taxable_gain_long,
+            tax_amount=tx.tax_amount_capital,
+            lots=lot_items,
+        ))
+
+    return TaxDetailsResponse(
+        ledger_id=ledger_id,
+        year=year,
+        details=details,
+    )

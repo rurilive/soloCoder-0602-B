@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 
 from app.database import engine, SessionLocal, Base, get_db
-from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot, TaxLotSale
 from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly, portfolio
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
@@ -252,6 +252,10 @@ def seed_db():
             dividend_amount=kwargs.get("dividend_amount"),
             reinvest=kwargs.get("reinvest", False),
             description=kwargs.get("description", ""),
+            taxable_gain_short=0.0,
+            taxable_gain_long=0.0,
+            tax_amount_capital=0.0,
+            dividend_tax=0.0,
         )
         return tx
 
@@ -270,6 +274,11 @@ def seed_db():
         db.add(lot)
         db.flush()
 
+    SHORT_TERM_RATE_SEED = 0.20
+    LONG_TERM_RATE_SEED = 0.10
+    DIVIDEND_TAX_RATE_SEED = 0.20
+    HOLDING_THRESHOLD_DAYS_SEED = 365
+
     def process_sell_fifo(tx, sec_id, ledger_id):
         db.add(tx)
         db.flush()
@@ -282,11 +291,37 @@ def seed_db():
         ).order_by(InvestmentLot.buy_date.asc(), InvestmentLot.id.asc()).all()
         total_cost = 0.0
         remaining = qty_needed
+        short_gain = 0.0
+        long_gain = 0.0
+        sell_date = datetime.strptime(tx.date, "%Y-%m-%d").date()
+        proceeds_per_share = (tx.amount - tx.fee) / tx.quantity if tx.quantity > 0 else 0.0
         for lot in lots:
-            if remaining <= 0:
+            if remaining <= 1e-9:
                 break
             sell = min(lot.quantity_remaining, remaining)
-            total_cost += sell * lot.cost_basis_per_share
+            cost_sold = sell * lot.cost_basis_per_share
+            total_cost += cost_sold
+            proceeds_sold = sell * proceeds_per_share
+            lot_gain = proceeds_sold - cost_sold
+            buy_date = datetime.strptime(lot.buy_date, "%Y-%m-%d").date()
+            holding_days = (sell_date - buy_date).days
+            gain_type = "short" if holding_days <= HOLDING_THRESHOLD_DAYS_SEED else "long"
+            if gain_type == "short":
+                short_gain += lot_gain
+            else:
+                long_gain += lot_gain
+            tax_lot_sale = TaxLotSale(
+                sell_transaction_id=tx.id, lot_id=lot.id,
+                security_id=sec_id, quantity_sold=sell,
+                cost_basis_per_share=lot.cost_basis_per_share,
+                cost_sold=round(cost_sold, 2),
+                proceeds_per_share=round(proceeds_per_share, 2),
+                proceeds_sold=round(proceeds_sold, 2),
+                gain=round(lot_gain, 2), holding_days=holding_days,
+                gain_type=gain_type, buy_date=lot.buy_date,
+                sell_date=tx.date, ledger_id=ledger_id,
+            )
+            db.add(tax_lot_sale)
             lot.quantity_remaining -= sell
             if lot.quantity_remaining <= 1e-9:
                 lot.quantity_remaining = 0.0
@@ -294,6 +329,50 @@ def seed_db():
             remaining -= sell
         proceeds = tx.amount - tx.fee
         tx.realized_gain = round(proceeds - total_cost, 2)
+        net_short = short_gain
+        net_long = long_gain
+        taxable_short = max(0.0, net_short)
+        taxable_long = max(0.0, net_long)
+        if net_short < 0:
+            taxable_long = max(0.0, net_long + net_short)
+        if net_long < 0 and net_short > 0:
+            taxable_short = max(0.0, net_short + net_long)
+        tx.taxable_gain_short = round(taxable_short, 2)
+        tx.taxable_gain_long = round(taxable_long, 2)
+        tx.tax_amount_capital = round(taxable_short * SHORT_TERM_RATE_SEED + taxable_long * LONG_TERM_RATE_SEED, 2)
+        db.flush()
+
+    def process_dividend(tx, sec_id, ledger_id):
+        db.add(tx)
+        db.flush()
+        div_tax = round((tx.dividend_amount or 0.0) * DIVIDEND_TAX_RATE_SEED, 2)
+        div_after_tax = round((tx.dividend_amount or 0.0) - div_tax, 2)
+        tx.dividend_tax = div_tax
+        tx.dividend_after_tax = div_after_tax
+        tx.amount = round(tx.dividend_amount or 0.0, 2)
+        if tx.reinvest:
+            reinvest_amount = div_after_tax
+            actual_qty = reinvest_amount / tx.price if tx.price > 0 else 0
+            reinvest_tx = InvestmentTransaction(
+                security_id=sec_id, type="buy", quantity=actual_qty,
+                price=tx.price, amount=reinvest_amount, fee=0.0,
+                date=tx.date, ledger_id=ledger_id, account_id=tx.account_id,
+                linked_transaction_id=tx.id,
+                description=f"分红再投资(税后净额) - {tx.description}",
+                taxable_gain_short=0.0, taxable_gain_long=0.0,
+                tax_amount_capital=0.0, dividend_tax=0.0,
+            )
+            db.add(reinvest_tx)
+            db.flush()
+            total_cost = reinvest_tx.amount + reinvest_tx.fee
+            cost_per = total_cost / reinvest_tx.quantity if reinvest_tx.quantity > 0 else 0
+            r_lot = InvestmentLot(
+                security_id=sec_id, buy_transaction_id=reinvest_tx.id,
+                quantity_remaining=actual_qty, cost_basis_per_share=cost_per,
+                original_quantity=actual_qty, buy_date=tx.date,
+                is_closed=False, ledger_id=ledger_id,
+            )
+            db.add(r_lot)
         db.flush()
 
     buy1 = create_inv_tx(sh600519.id, "buy", 100, 1500.00, 5.00, "2025-12-01", personal.id, inv_account.id, description="首次建仓茅台")
@@ -319,7 +398,7 @@ def seed_db():
         lot.cost_basis_per_share = total_cost / lot.quantity_remaining
     db.flush()
     div1 = create_inv_tx(sh600519.id, "dividend", 0, 0, 0, "2026-05-15", personal.id, inv_account.id, dividend_amount=2580.00, description="现金分红")
-    db.add(div1)
+    process_dividend(div1, sh600519.id, personal.id)
 
     etf_buy1 = create_inv_tx(sh510300.id, "buy", 10000, 3.80, 5.00, "2025-11-01", personal.id, inv_account.id, description="定投沪深300")
     process_buy(etf_buy1, sh510300.id, personal.id)
@@ -335,7 +414,7 @@ def seed_db():
     aapl_buy2 = create_inv_tx(aapl.id, "buy", 30, 195.00, 0.80, "2026-02-10", personal.id, usd_inv.id, description="加仓苹果")
     process_buy(aapl_buy2, aapl.id, personal.id)
     aapl_div = create_inv_tx(aapl.id, "dividend", 0, 0, 0, "2026-03-15", personal.id, usd_inv.id, dividend_amount=48.00, description="苹果季度分红")
-    db.add(aapl_div)
+    process_dividend(aapl_div, aapl.id, personal.id)
 
     tsla_buy1 = create_inv_tx(tsla.id, "buy", 40, 240.00, 1.20, "2026-01-05", personal.id, usd_inv.id, description="买入特斯拉")
     process_buy(tsla_buy1, tsla.id, personal.id)
@@ -347,28 +426,10 @@ def seed_db():
     fam_etf2 = create_inv_tx(family_510300.id, "buy", 10000, 4.05, 4.00, "2026-02-01", family.id, family_inv.id, description="追加配置")
     process_buy(fam_etf2, family_510300.id, family.id)
     fam_div_reinvest = create_inv_tx(
-        family_510300.id, "dividend", 1200, 4.00, 0, "2026-04-15", family.id, family_inv.id,
+        family_510300.id, "dividend", 0, 4.00, 0, "2026-04-15", family.id, family_inv.id,
         dividend_amount=4800.00, reinvest=True, description="分红再投资验证"
     )
-    db.add(fam_div_reinvest)
-    db.flush()
-    reinvest_buy = InvestmentTransaction(
-        security_id=family_510300.id, type="buy", quantity=1200,
-        price=4.00, amount=4800.00, fee=0.0, date="2026-04-15",
-        ledger_id=family.id, account_id=family_inv.id,
-        linked_transaction_id=fam_div_reinvest.id,
-        description="分红再投资 - 家庭配置沪深300",
-    )
-    db.add(reinvest_buy)
-    db.flush()
-    r_cost_per = 4800.00 / 1200
-    r_lot = InvestmentLot(
-        security_id=family_510300.id, buy_transaction_id=reinvest_buy.id,
-        quantity_remaining=1200, cost_basis_per_share=r_cost_per,
-        original_quantity=1200, buy_date="2026-04-15",
-        is_closed=False, ledger_id=family.id,
-    )
-    db.add(r_lot)
+    process_dividend(fam_div_reinvest, family_510300.id, family.id)
 
     db.commit()
     db.close()

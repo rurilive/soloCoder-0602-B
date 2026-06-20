@@ -36,8 +36,10 @@ import {
   SplitCellsOutlined,
   InfoCircleOutlined,
   UnorderedListOutlined,
+  AccountBookOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
-import { Area } from '@ant-design/charts';
+import { Area, Column } from '@ant-design/charts';
 import dayjs from 'dayjs';
 import {
   portfolioApi,
@@ -96,6 +98,11 @@ export default function Portfolio({ currentLedger }) {
   const [txForm] = Form.useForm();
   const [secForm] = Form.useForm();
   const [txType, setTxType] = useState('buy');
+  const [taxSummary, setTaxSummary] = useState(null);
+  const [taxDetails, setTaxDetails] = useState(null);
+  const [taxYear, setTaxYear] = useState(dayjs().year());
+  const [taxLoading, setTaxLoading] = useState(false);
+  const [activeMainTab, setActiveMainTab] = useState('holdings');
 
   const fetchAll = async () => {
     if (!currentLedger) return;
@@ -128,6 +135,29 @@ export default function Portfolio({ currentLedger }) {
       setHistoryLoading(false);
     }
   };
+
+  const fetchTaxData = async () => {
+    if (!currentLedger) return;
+    setTaxLoading(true);
+    try {
+      const [sum, det] = await Promise.all([
+        portfolioApi.getTaxSummary(currentLedger.id, taxYear),
+        portfolioApi.getTaxDetails(currentLedger.id, taxYear),
+      ]);
+      setTaxSummary(sum);
+      setTaxDetails(det);
+    } catch (e) {
+      message.error(e.message || '加载税务数据失败');
+    } finally {
+      setTaxLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeMainTab === 'tax') {
+      fetchTaxData();
+    }
+  }, [currentLedger, taxYear, activeMainTab]);
 
   useEffect(() => {
     fetchAll();
@@ -531,6 +561,132 @@ export default function Portfolio({ currentLedger }) {
     },
   ];
 
+  const monthlyTaxChartData = useMemo(() => {
+    if (!taxSummary?.monthly_calendar) return [];
+    const result = [];
+    for (const m of taxSummary.monthly_calendar) {
+      if (m.short_gain !== 0 || m.long_gain !== 0 || m.dividend_income !== 0 || m.total_tax !== 0) {
+        result.push({ month: `${m.month}月`, type: '短期收益', value: m.short_gain });
+        result.push({ month: `${m.month}月`, type: '长期收益', value: m.long_gain });
+        result.push({ month: `${m.month}月`, type: '分红收入', value: m.dividend_income });
+        result.push({ month: `${m.month}月`, type: '应纳税额', value: m.total_tax });
+      }
+    }
+    return result;
+  }, [taxSummary]);
+
+  const monthlyTaxChartConfig = {
+    data: monthlyTaxChartData,
+    xField: 'month',
+    yField: 'value',
+    seriesField: 'type',
+    isGroup: true,
+    color: ['#f5222d', '#52c41a', '#faad14', '#1890ff'],
+    legend: { position: 'top' },
+  };
+
+  const taxDetailColumns = [
+    { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
+    {
+      title: '证券',
+      key: 'security',
+      width: 160,
+      render: (_, r) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{r.symbol}</div>
+          <div style={{ fontSize: 12, color: '#666' }}>{r.name}</div>
+        </div>
+      ),
+    },
+    {
+      title: '卖出数量',
+      dataIndex: 'sell_quantity',
+      key: 'sell_quantity',
+      width: 100,
+      align: 'right',
+      render: (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 4 }),
+    },
+    {
+      title: '收入',
+      dataIndex: 'proceeds',
+      key: 'proceeds',
+      width: 120,
+      align: 'right',
+      render: (v) => formatCurrency(v, baseCur),
+    },
+    {
+      title: '成本',
+      dataIndex: 'total_cost',
+      key: 'total_cost',
+      width: 120,
+      align: 'right',
+      render: (v) => formatCurrency(v, baseCur),
+    },
+    {
+      title: '已实现收益',
+      dataIndex: 'realized_gain',
+      key: 'realized_gain',
+      width: 120,
+      align: 'right',
+      render: (v) => formatGain(v, baseCur),
+    },
+    {
+      title: '短期收益',
+      dataIndex: 'taxable_gain_short',
+      key: 'taxable_gain_short',
+      width: 120,
+      align: 'right',
+      render: (v) => (
+        <span style={{ color: v > 0 ? '#f5222d' : '#999' }}>{formatCurrency(v, baseCur)}</span>
+      ),
+    },
+    {
+      title: '长期收益',
+      dataIndex: 'taxable_gain_long',
+      key: 'taxable_gain_long',
+      width: 120,
+      align: 'right',
+      render: (v) => (
+        <span style={{ color: v > 0 ? '#52c41a' : '#999' }}>{formatCurrency(v, baseCur)}</span>
+      ),
+    },
+    {
+      title: '资本利得税',
+      dataIndex: 'tax_amount',
+      key: 'tax_amount',
+      width: 120,
+      align: 'right',
+      render: (v) => <span style={{ color: '#f5222d', fontWeight: 500 }}>{formatCurrency(v, baseCur)}</span>,
+    },
+    {
+      title: '批次明细',
+      key: 'lots',
+      width: 80,
+      render: (_, r) => (
+        <Tooltip
+          title={
+            <div>
+              {r.lots.map((l, i) => (
+                <div key={i} style={{ marginBottom: 4, borderBottom: '1px solid #444', paddingBottom: 4 }}>
+                  <div>买入日: {l.buy_date} → 卖出日: {l.sell_date}</div>
+                  <div>持有{l.holding_days}天
+                    <Tag color={l.gain_type === 'short' ? 'red' : 'green'} style={{ marginLeft: 4, fontSize: 11 }}>
+                      {l.gain_type === 'short' ? '短期' : '长期'}
+                    </Tag>
+                  </div>
+                  <div>数量: {Number(l.quantity_sold).toFixed(2)} | 成本: {formatCurrency(l.cost_sold, baseCur)} | 收入: {formatCurrency(l.proceeds_sold, baseCur)}</div>
+                  <div>收益: {formatGain(l.gain, baseCur)}</div>
+                </div>
+              ))}
+            </div>
+          }
+        >
+          <Tag color="blue" style={{ cursor: 'pointer' }}>{r.lots.length}批</Tag>
+        </Tooltip>
+      ),
+    },
+  ];
+
   return (
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
@@ -540,7 +696,7 @@ export default function Portfolio({ currentLedger }) {
         <Button icon={<PlusOutlined />} onClick={() => setSecModalOpen(true)}>
           添加证券
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={() => { fetchAll(); fetchHistory(); }} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => { fetchAll(); fetchHistory(); if (activeMainTab === 'tax') fetchTaxData(); }} loading={loading}>
           刷新
         </Button>
         <Tag color="purple">
@@ -573,53 +729,179 @@ export default function Portfolio({ currentLedger }) {
         ))}
       </Row>
 
-      <Card
-        title={
-          <Space>
-            <StockOutlined /> 持仓明细
-            <Tooltip title="点击行展开查看批次和交易历史">
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                <InfoCircleOutlined /> 点击展开详情
-              </Text>
-            </Tooltip>
-          </Space>
-        }
-        style={{ marginBottom: 16 }}
-      >
-        <Table
-          loading={loading}
-          columns={holdingsColumns}
-          dataSource={summary?.holdings || []}
-          rowKey="security_id"
-          pagination={false}
-          scroll={{ x: 1400 }}
-          expandable={{
-            expandedRowRender,
-            expandedRowKeys: expandedKeys,
-            onExpandedRowsChange: setExpandedKeys,
-          }}
-          rowClassName={(r) => r.quantity <= 0 ? 'ant-table-row-disabled' : ''}
-        />
-      </Card>
+      <Tabs
+        activeKey={activeMainTab}
+        onChange={setActiveMainTab}
+        items={[
+          {
+            key: 'holdings',
+            label: <span><StockOutlined /> 持仓明细</span>,
+            children: (
+              <Card style={{ marginBottom: 16 }}>
+                <Table
+                  loading={loading}
+                  columns={holdingsColumns}
+                  dataSource={summary?.holdings || []}
+                  rowKey="security_id"
+                  pagination={false}
+                  scroll={{ x: 1400 }}
+                  expandable={{
+                    expandedRowRender,
+                    expandedRowKeys: expandedKeys,
+                    onExpandedRowsChange: setExpandedKeys,
+                  }}
+                  rowClassName={(r) => r.quantity <= 0 ? 'ant-table-row-disabled' : ''}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'trend',
+            label: <span><FundOutlined /> 市值趋势</span>,
+            children: (
+              <Card loading={historyLoading}>
+                {chartData.length > 0 ? (
+                  <div style={{ width: '100%', height: 360, position: 'relative' }}>
+                    <Area {...chartConfig} style={{ width: '100%', height: '100%' }} />
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+                    暂无历史数据
+                  </div>
+                )}
+              </Card>
+            ),
+          },
+          {
+            key: 'tax',
+            label: <span><AccountBookOutlined /> 税务中心</span>,
+            children: (
+              <div>
+                <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                  <Col>
+                    <Space>
+                      <CalendarOutlined />
+                      <span style={{ fontWeight: 500 }}>年度：</span>
+                      <Select
+                        value={taxYear}
+                        onChange={setTaxYear}
+                        style={{ width: 100 }}
+                        options={Array.from({ length: 5 }, (_, i) => {
+                          const y = dayjs().year() - i;
+                          return { value: y, label: `${y}年` };
+                        })}
+                      />
+                    </Space>
+                  </Col>
+                </Row>
 
-      <Card
-        title={
-          <Space>
-            <FundOutlined /> 持仓市值变化趋势（近90天）
-          </Space>
-        }
-        loading={historyLoading}
-      >
-        {chartData.length > 0 ? (
-          <div style={{ width: '100%', height: 360, position: 'relative' }}>
-            <Area {...chartConfig} style={{ width: '100%', height: '100%' }} />
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
-            暂无历史数据
-          </div>
-        )}
-      </Card>
+                {taxSummary && (
+                  <>
+                    <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                      <Col xs={24} sm={12} lg={6}>
+                        <Card>
+                          <Statistic
+                            title={<span style={{ color: '#666', fontSize: 13 }}><span style={{ color: '#f5222d', marginRight: 6 }}><RiseOutlined /></span>短期已实现收益</span>}
+                            value={taxSummary.short_gain_total}
+                            precision={2}
+                            prefix={CURRENCY_SYMBOLS[baseCur]}
+                            valueStyle={{ color: taxSummary.short_gain_total >= 0 ? '#f5222d' : '#52c41a', fontSize: 20 }}
+                            suffix={<Tag color="red" style={{ marginLeft: 8, fontSize: 11 }}>税率20%</Tag>}
+                          />
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+                            成本 {formatCurrency(taxSummary.short_cost_total, baseCur)} / 收入 {formatCurrency(taxSummary.short_proceeds_total, baseCur)}
+                          </div>
+                        </Card>
+                      </Col>
+                      <Col xs={24} sm={12} lg={6}>
+                        <Card>
+                          <Statistic
+                            title={<span style={{ color: '#666', fontSize: 13 }}><span style={{ color: '#52c41a', marginRight: 6 }}><RiseOutlined /></span>长期已实现收益</span>}
+                            value={taxSummary.long_gain_total}
+                            precision={2}
+                            prefix={CURRENCY_SYMBOLS[baseCur]}
+                            valueStyle={{ color: taxSummary.long_gain_total >= 0 ? '#52c41a' : '#f5222d', fontSize: 20 }}
+                            suffix={<Tag color="green" style={{ marginLeft: 8, fontSize: 11 }}>税率10%</Tag>}
+                          />
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+                            成本 {formatCurrency(taxSummary.long_cost_total, baseCur)} / 收入 {formatCurrency(taxSummary.long_proceeds_total, baseCur)}
+                          </div>
+                        </Card>
+                      </Col>
+                      <Col xs={24} sm={12} lg={6}>
+                        <Card>
+                          <Statistic
+                            title={<span style={{ color: '#666', fontSize: 13 }}><span style={{ color: '#faad14', marginRight: 6 }}><GiftOutlined /></span>分红税后收入</span>}
+                            value={taxSummary.dividend_income_total - taxSummary.dividend_tax_total}
+                            precision={2}
+                            prefix={CURRENCY_SYMBOLS[baseCur]}
+                            valueStyle={{ fontSize: 20 }}
+                          />
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+                            税前 {formatCurrency(taxSummary.dividend_income_total, baseCur)} / 代扣税 <span style={{ color: '#f5222d' }}>{formatCurrency(taxSummary.dividend_tax_total, baseCur)}</span>
+                          </div>
+                        </Card>
+                      </Col>
+                      <Col xs={24} sm={12} lg={6}>
+                        <Card>
+                          <Statistic
+                            title={<span style={{ color: '#666', fontSize: 13 }}><span style={{ color: '#1890ff', marginRight: 6 }}><DollarOutlined /></span>预估应纳税额合计</span>}
+                            value={taxSummary.total_tax}
+                            precision={2}
+                            prefix={CURRENCY_SYMBOLS[baseCur]}
+                            valueStyle={{ color: '#f5222d', fontSize: 20 }}
+                          />
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+                            资本利得税 {formatCurrency(taxSummary.total_capital_tax, baseCur)} / 分红税 {formatCurrency(taxSummary.dividend_tax_total, baseCur)}
+                            <Divider type="vertical" />
+                            有效税率 <span style={{ fontWeight: 600, color: '#1890ff' }}>{taxSummary.effective_tax_rate}%</span>
+                          </div>
+                        </Card>
+                      </Col>
+                    </Row>
+
+                    <Card
+                      title={<span><AccountBookOutlined /> 已实现收益分类明细</span>}
+                      style={{ marginBottom: 16 }}
+                    >
+                      <Table
+                        loading={taxLoading}
+                        columns={taxDetailColumns}
+                        dataSource={taxDetails?.details || []}
+                        rowKey="transaction_id"
+                        pagination={false}
+                        scroll={{ x: 1200 }}
+                        size="small"
+                      />
+                    </Card>
+
+                    <Card
+                      title={<span><CalendarOutlined /> 月度税务日历 ({taxYear}年)</span>}
+                    >
+                      {monthlyTaxChartData.length > 0 ? (
+                        <div style={{ width: '100%', height: 360, position: 'relative' }}>
+                          <Column {...monthlyTaxChartConfig} style={{ width: '100%', height: '100%' }} />
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+                          本年度暂无税务数据
+                        </div>
+                      )}
+                    </Card>
+                  </>
+                )}
+
+                {!taxSummary && !taxLoading && (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+                    <AccountBookOutlined style={{ fontSize: 48, marginBottom: 16, display: 'block' }} />
+                    暂无税务数据，请选择年度查看
+                  </div>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title={

@@ -825,6 +825,11 @@ class InvestmentTransactionOut(BaseModel):
     dividend_amount: Optional[float] = None
     reinvest: bool
     realized_gain: float
+    taxable_gain_short: float = 0.0
+    taxable_gain_long: float = 0.0
+    tax_amount_capital: float = 0.0
+    dividend_tax: float = 0.0
+    dividend_after_tax: Optional[float] = None
     description: str
     ledger_id: int
     account_id: int
@@ -891,3 +896,88 @@ class PortfolioHistoryResponse(BaseModel):
     ledger_id: int
     base_currency: str
     points: List[PortfolioHistoryPoint]
+
+
+class TaxLotSaleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sell_transaction_id: int
+    lot_id: int
+    security_id: int
+    quantity_sold: float
+    cost_basis_per_share: float
+    cost_sold: float
+    proceeds_per_share: float
+    proceeds_sold: float
+    gain: float
+    holding_days: int
+    gain_type: str
+    buy_date: str
+    sell_date: str
+    ledger_id: int
+    created_at: datetime
+
+
+class TaxDetailLotItem(BaseModel):
+    lot_id: int
+    buy_date: str
+    sell_date: str
+    holding_days: int
+    gain_type: str
+    quantity_sold: float
+    cost_sold: float
+    proceeds_sold: float
+    gain: float
+
+
+class TaxDetailItem(BaseModel):
+    transaction_id: int
+    date: str
+    security_id: int
+    symbol: str
+    name: str
+    sell_quantity: float
+    sell_price: float
+    proceeds: float
+    total_cost: float
+    realized_gain: float
+    taxable_gain_short: float
+    taxable_gain_long: float
+    tax_amount: float
+    lots: List[TaxDetailLotItem]
+
+
+class MonthlyTaxCalendarItem(BaseModel):
+    year: int
+    month: int
+    short_gain: float
+    long_gain: float
+    dividend_income: float
+    dividend_tax: float
+    capital_tax: float
+    total_tax: float
+
+
+class TaxSummaryResponse(BaseModel):
+    ledger_id: int
+    year: int
+    short_gain_total: float
+    short_cost_total: float
+    short_proceeds_total: float
+    short_tax: float
+    long_gain_total: float
+    long_cost_total: float
+    long_proceeds_total: float
+    long_tax: float
+    dividend_income_total: float
+    dividend_tax_total: float
+    total_capital_tax: float
+    total_tax: float
+    effective_tax_rate: float
+    monthly_calendar: List[MonthlyTaxCalendarItem]
+
+
+class TaxDetailsResponse(BaseModel):
+    ledger_id: int
+    year: int
+    details: List[TaxDetailItem]

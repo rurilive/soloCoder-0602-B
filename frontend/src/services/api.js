@@ -283,4 +283,14 @@ export const portfolioApi = {
   getSummary: (ledgerId) => request(`/portfolio/summary?ledger_id=${ledgerId}`),
   getHistory: (ledgerId, days = 90) => request(`/portfolio/history?ledger_id=${ledgerId}&days=${days}`),
   getLots: (securityId) => request(`/portfolio/lots/${securityId}`),
+  getTaxSummary: (ledgerId, year) => {
+    const params = new URLSearchParams({ ledger_id: ledgerId });
+    if (year) params.set('year', year);
+    return request(`/portfolio/tax/summary?${params.toString()}`);
+  },
+  getTaxDetails: (ledgerId, year) => {
+    const params = new URLSearchParams({ ledger_id: ledgerId });
+    if (year) params.set('year', year);
+    return request(`/portfolio/tax/details?${params.toString()}`);
+  },
 };
