@@ -12,21 +12,6 @@ from app.schemas import AnomalyDetectionResponse, AnomalyTransactionItem
 router = APIRouter(prefix="/api/anomaly", tags=["anomaly"])
 
 
-def _add_months(year: int, month: int, delta: int):
-    total = year * 12 + (month - 1) + delta
-    y, m = divmod(total, 12)
-    return y, m + 1
-
-
-def _month_range(year: int, month: int):
-    start = f"{year:04d}-{month:02d}-01"
-    if month == 12:
-        end = f"{year + 1:04d}-01-01"
-    else:
-        end = f"{year:04d}-{month + 1:02d}-01"
-    return start, end
-
-
 def _detect_amount_iqr(transactions):
     if len(transactions) < 4:
         return {}
@@ -119,12 +104,14 @@ def _detect_time_anomaly(transactions):
             if z > 2.0:
                 unusual_dows.add(dow)
 
-    sorted_date_objs = [tx_dates[t.id] for t in sorted_txs if t.id in tx_dates]
     intervals = []
-    for i in range(1, len(sorted_date_objs)):
-        gap = (sorted_date_objs[i] - sorted_date_objs[i - 1]).days
-        if gap > 0:
-            intervals.append(gap)
+    for i in range(1, len(sorted_txs)):
+        prev_dt = tx_dates.get(sorted_txs[i - 1].id)
+        curr_dt = tx_dates.get(sorted_txs[i].id)
+        if prev_dt is not None and curr_dt is not None:
+            gap = (curr_dt - prev_dt).days
+            if gap > 0:
+                intervals.append(gap)
 
     short_interval_threshold = None
     long_interval_threshold = None
