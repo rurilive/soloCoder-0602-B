@@ -209,6 +209,22 @@ export const loanApi = {
   simulateRateChange: (data, signal) => request('/loans/rate-change/simulation', { method: 'POST', body: JSON.stringify(data), signal }),
 };
 
+function parseContentDispositionFilename(disposition) {
+  if (!disposition) return 'export.csv';
+  const starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (starMatch && starMatch[1]) {
+    try {
+      return decodeURIComponent(starMatch[1].replace(/["']/g, ''));
+    } catch (e) {
+    }
+  }
+  const plainMatch = disposition.match(/; filename=([^;]+)/i) || disposition.match(/filename=([^;]+)$/i);
+  if (plainMatch && plainMatch[1]) {
+    return plainMatch[1].replace(/["']/g, '');
+  }
+  return 'export.csv';
+}
+
 async function downloadRequest(url) {
   const res = await fetch(BASE + url);
   if (!res.ok) {
@@ -217,8 +233,7 @@ async function downloadRequest(url) {
   }
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition') || '';
-  const match = disposition.match(/filename=(.+)$/);
-  const filename = match ? match[1].replace(/["']/g, '') : 'export.csv';
+  const filename = parseContentDispositionFilename(disposition);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;

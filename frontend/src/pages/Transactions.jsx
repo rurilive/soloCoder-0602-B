@@ -13,13 +13,21 @@ export default function Transactions({ currentLedger }) {
   const [editItem, setEditItem] = useState(null);
   const [form] = Form.useForm();
   const [filterMonth, setFilterMonth] = useState(dayjs());
+  const [filterType, setFilterType] = useState();
+  const [filterCategoryId, setFilterCategoryId] = useState();
 
   const fetchData = async () => {
     if (!currentLedger) return;
     setLoading(true);
     try {
       const [txs, cats, accs] = await Promise.all([
-        transactionApi.list({ ledger_id: currentLedger.id, year: filterMonth.year(), month: filterMonth.month() + 1 }),
+        transactionApi.list({
+          ledger_id: currentLedger.id,
+          year: filterMonth.year(),
+          month: filterMonth.month() + 1,
+          type: filterType,
+          category_id: filterCategoryId,
+        }),
         categoryApi.list({ ledger_id: currentLedger.id }),
         accountApi.list({ ledger_id: currentLedger.id }),
       ]);
@@ -31,7 +39,7 @@ export default function Transactions({ currentLedger }) {
     }
   };
 
-  useEffect(() => { fetchData(); }, [currentLedger, filterMonth]);
+  useEffect(() => { fetchData(); }, [currentLedger, filterMonth, filterType, filterCategoryId]);
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
@@ -63,6 +71,8 @@ export default function Transactions({ currentLedger }) {
         ledger_id: currentLedger.id,
         year: filterMonth.year(),
         month: filterMonth.month() + 1,
+        type: filterType,
+        category_id: filterCategoryId,
       });
       message.success({ content: '导出成功', key: 'export' });
     } catch (e) {
@@ -145,10 +155,39 @@ export default function Transactions({ currentLedger }) {
   const selectedAccountObj = accounts.find((a) => a.id === selectedAccountId);
   const selectedCurrency = selectedAccountObj?.currency || 'CNY';
 
+  const filterCategories = filterType
+    ? categories.filter((c) => c.type === filterType)
+    : categories;
+
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <DatePicker picker="month" value={filterMonth} onChange={setFilterMonth} allowClear={false} />
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <Space wrap>
+          <DatePicker picker="month" value={filterMonth} onChange={setFilterMonth} allowClear={false} />
+          <Select
+            placeholder="筛选类型"
+            style={{ width: 120 }}
+            allowClear
+            value={filterType}
+            onChange={(v) => { setFilterType(v); setFilterCategoryId(undefined); }}
+          >
+            <Select.Option value="income">收入</Select.Option>
+            <Select.Option value="expense">支出</Select.Option>
+          </Select>
+          <Select
+            placeholder="筛选分类"
+            style={{ width: 140 }}
+            allowClear
+            value={filterCategoryId}
+            onChange={setFilterCategoryId}
+            showSearch
+            optionFilterProp="label"
+          >
+            {filterCategories.map((c) => (
+              <Select.Option key={c.id} value={c.id} label={c.name}>{c.name}</Select.Option>
+            ))}
+          </Select>
+        </Space>
         <Space>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出CSV</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加记录</Button>

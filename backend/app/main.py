@@ -155,7 +155,7 @@ def _month_range(year: int, month: int):
     return start, end
 
 
-def _build_csv_response(headers: List[str], rows: List[List], filename_prefix: str):
+def _build_csv_response(headers: List[str], rows: List[List], filename_prefix: str, ascii_prefix: str = "export"):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(headers)
@@ -164,12 +164,13 @@ def _build_csv_response(headers: List[str], rows: List[List], filename_prefix: s
     buffer.seek(0)
     today = datetime.now().strftime("%Y%m%d")
     filename = f"{filename_prefix}_{today}.csv"
+    ascii_filename = f"{ascii_prefix}_{today}.csv"
     encoded_filename = urllib.parse.quote(filename)
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv; charset=utf-8-sig",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename={encoded_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename={ascii_filename}"
         },
     )
 
@@ -216,7 +217,7 @@ def export_transactions(
             f"{tx.amount:.2f}",
             tx.description,
         ])
-    return _build_csv_response(headers, rows, "交易记录")
+    return _build_csv_response(headers, rows, "交易记录", ascii_prefix="transactions")
 
 
 @app.get("/api/export/monthly-report")
@@ -319,12 +320,13 @@ def export_monthly_report(
     buffer.seek(0)
     today = datetime.now().strftime("%Y%m%d")
     filename = f"月度报表_{year}{month:02d}_{today}.csv"
+    ascii_filename = f"monthly-report_{year}{month:02d}_{today}.csv"
     encoded_filename = urllib.parse.quote(filename)
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv; charset=utf-8-sig",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename={encoded_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename={ascii_filename}"
         },
     )
 
@@ -370,7 +372,7 @@ def export_loan_schedule(
             s.transaction_id if s.transaction_id else "-",
         ])
 
-    return _build_csv_response(headers, rows, f"贷款还款计划_{loan.name}")
+    return _build_csv_response(headers, rows, f"贷款还款计划_{loan.name}", ascii_prefix="loan-schedule")
 
 
 def _get_level_info(score: float):
