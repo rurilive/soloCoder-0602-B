@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 
 from app.database import engine, SessionLocal, Base, get_db
-from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly, portfolio
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
 
@@ -188,6 +188,189 @@ def seed_db():
     ]
     db.add_all(sample_rules)
     db.commit()
+
+    inv_account = Account(
+        name="证券账户", type="investment", icon="stock",
+        initial_balance=100000, currency="CNY", ledger_id=personal.id,
+    )
+    family_inv = Account(
+        name="家庭理财账户", type="investment", icon="fund",
+        initial_balance=200000, currency="CNY", ledger_id=family.id,
+    )
+    usd_inv = Account(
+        name="美股账户", type="investment", icon="global",
+        initial_balance=10000, currency="USD", ledger_id=personal.id,
+    )
+    db.add_all([inv_account, family_inv, usd_inv])
+    db.commit()
+    db.refresh(inv_account)
+    db.refresh(family_inv)
+    db.refresh(usd_inv)
+
+    aapl = InvestmentSecurity(
+        symbol="AAPL", name="苹果公司", type="stock",
+        currency="USD", current_price=210.50, ledger_id=personal.id,
+    )
+    tsla = InvestmentSecurity(
+        symbol="TSLA", name="特斯拉", type="stock",
+        currency="USD", current_price=175.30, ledger_id=personal.id,
+    )
+    sh510300 = InvestmentSecurity(
+        symbol="510300", name="沪深300ETF", type="etf",
+        currency="CNY", current_price=4.25, ledger_id=personal.id,
+    )
+    sh600519 = InvestmentSecurity(
+        symbol="600519", name="贵州茅台", type="stock",
+        currency="CNY", current_price=1680.00, ledger_id=personal.id,
+    )
+    family_510300 = InvestmentSecurity(
+        symbol="510300", name="沪深300ETF", type="etf",
+        currency="CNY", current_price=4.25, ledger_id=family.id,
+    )
+    db.add_all([aapl, tsla, sh510300, sh600519, family_510300])
+    db.commit()
+    db.refresh(aapl)
+    db.refresh(tsla)
+    db.refresh(sh510300)
+    db.refresh(sh600519)
+    db.refresh(family_510300)
+
+    def create_inv_tx(sec_id, tx_type, qty, price, fee, date, ledger_id, acc_id, **kwargs):
+        if tx_type == "buy":
+            amount = qty * price
+        elif tx_type == "sell":
+            amount = qty * price
+        elif tx_type == "dividend":
+            amount = kwargs.get("dividend_amount", 0.0)
+        else:
+            amount = 0.0
+        tx = InvestmentTransaction(
+            security_id=sec_id, type=tx_type, quantity=qty,
+            price=price, amount=amount, fee=fee, date=date,
+            ledger_id=ledger_id, account_id=acc_id,
+            split_ratio=kwargs.get("split_ratio"),
+            dividend_amount=kwargs.get("dividend_amount"),
+            reinvest=kwargs.get("reinvest", False),
+            description=kwargs.get("description", ""),
+        )
+        return tx
+
+    def process_buy(tx, sec_id, ledger_id):
+        db.add(tx)
+        db.flush()
+        total_cost = tx.amount + tx.fee
+        qty = tx.quantity
+        cost_per = total_cost / qty
+        lot = InvestmentLot(
+            security_id=sec_id, buy_transaction_id=tx.id,
+            quantity_remaining=qty, cost_basis_per_share=cost_per,
+            original_quantity=qty, buy_date=tx.date,
+            is_closed=False, ledger_id=ledger_id,
+        )
+        db.add(lot)
+        db.flush()
+
+    def process_sell_fifo(tx, sec_id, ledger_id):
+        db.add(tx)
+        db.flush()
+        qty_needed = tx.quantity
+        lots = db.query(InvestmentLot).filter(
+            InvestmentLot.security_id == sec_id,
+            InvestmentLot.ledger_id == ledger_id,
+            InvestmentLot.is_closed == False,
+            InvestmentLot.quantity_remaining > 0,
+        ).order_by(InvestmentLot.buy_date.asc(), InvestmentLot.id.asc()).all()
+        total_cost = 0.0
+        remaining = qty_needed
+        for lot in lots:
+            if remaining <= 0:
+                break
+            sell = min(lot.quantity_remaining, remaining)
+            total_cost += sell * lot.cost_basis_per_share
+            lot.quantity_remaining -= sell
+            if lot.quantity_remaining <= 1e-9:
+                lot.quantity_remaining = 0.0
+                lot.is_closed = True
+            remaining -= sell
+        proceeds = tx.amount - tx.fee
+        tx.realized_gain = round(proceeds - total_cost, 2)
+        db.flush()
+
+    buy1 = create_inv_tx(sh600519.id, "buy", 100, 1500.00, 5.00, "2025-12-01", personal.id, inv_account.id, description="首次建仓茅台")
+    process_buy(buy1, sh600519.id, personal.id)
+    buy2 = create_inv_tx(sh600519.id, "buy", 50, 1600.00, 3.00, "2026-01-15", personal.id, inv_account.id, description="加仓茅台")
+    process_buy(buy2, sh600519.id, personal.id)
+    sell1 = create_inv_tx(sh600519.id, "sell", 30, 1650.00, 2.00, "2026-02-20", personal.id, inv_account.id, description="部分卖出验证FIFO")
+    process_sell_fifo(sell1, sh600519.id, personal.id)
+    buy3 = create_inv_tx(sh600519.id, "buy", 80, 1550.00, 4.00, "2026-03-10", personal.id, inv_account.id, description="回调加仓")
+    process_buy(buy3, sh600519.id, personal.id)
+    split1 = create_inv_tx(sh600519.id, "split", 0, 0, 0, "2026-04-01", personal.id, inv_account.id, split_ratio=2.0, description="10送10拆股验证")
+    db.add(split1)
+    db.flush()
+    split_lots = db.query(InvestmentLot).filter(
+        InvestmentLot.security_id == sh600519.id,
+        InvestmentLot.ledger_id == personal.id,
+        InvestmentLot.is_closed == False,
+    ).all()
+    for lot in split_lots:
+        total_cost = lot.quantity_remaining * lot.cost_basis_per_share
+        lot.original_quantity = lot.original_quantity * 2.0
+        lot.quantity_remaining = lot.quantity_remaining * 2.0
+        lot.cost_basis_per_share = total_cost / lot.quantity_remaining
+    db.flush()
+    div1 = create_inv_tx(sh600519.id, "dividend", 0, 0, 0, "2026-05-15", personal.id, inv_account.id, dividend_amount=2580.00, description="现金分红")
+    db.add(div1)
+
+    etf_buy1 = create_inv_tx(sh510300.id, "buy", 10000, 3.80, 5.00, "2025-11-01", personal.id, inv_account.id, description="定投沪深300")
+    process_buy(etf_buy1, sh510300.id, personal.id)
+    etf_buy2 = create_inv_tx(sh510300.id, "buy", 5000, 4.00, 3.00, "2026-01-01", personal.id, inv_account.id, description="定投加仓")
+    process_buy(etf_buy2, sh510300.id, personal.id)
+    etf_buy3 = create_inv_tx(sh510300.id, "buy", 8000, 4.10, 4.00, "2026-03-01", personal.id, inv_account.id, description="定投")
+    process_buy(etf_buy3, sh510300.id, personal.id)
+    etf_sell = create_inv_tx(sh510300.id, "sell", 3000, 4.20, 1.50, "2026-05-01", personal.id, inv_account.id, description="止盈部分仓位")
+    process_sell_fifo(etf_sell, sh510300.id, personal.id)
+
+    aapl_buy1 = create_inv_tx(aapl.id, "buy", 50, 180.00, 1.00, "2025-12-15", personal.id, usd_inv.id, description="买入苹果")
+    process_buy(aapl_buy1, aapl.id, personal.id)
+    aapl_buy2 = create_inv_tx(aapl.id, "buy", 30, 195.00, 0.80, "2026-02-10", personal.id, usd_inv.id, description="加仓苹果")
+    process_buy(aapl_buy2, aapl.id, personal.id)
+    aapl_div = create_inv_tx(aapl.id, "dividend", 0, 0, 0, "2026-03-15", personal.id, usd_inv.id, dividend_amount=48.00, description="苹果季度分红")
+    db.add(aapl_div)
+
+    tsla_buy1 = create_inv_tx(tsla.id, "buy", 40, 240.00, 1.20, "2026-01-05", personal.id, usd_inv.id, description="买入特斯拉")
+    process_buy(tsla_buy1, tsla.id, personal.id)
+    tsla_sell = create_inv_tx(tsla.id, "sell", 10, 190.00, 0.60, "2026-04-20", personal.id, usd_inv.id, description="止损部分仓位")
+    process_sell_fifo(tsla_sell, tsla.id, personal.id)
+
+    fam_etf1 = create_inv_tx(family_510300.id, "buy", 20000, 3.90, 8.00, "2025-12-01", family.id, family_inv.id, description="家庭配置沪深300")
+    process_buy(fam_etf1, family_510300.id, family.id)
+    fam_etf2 = create_inv_tx(family_510300.id, "buy", 10000, 4.05, 4.00, "2026-02-01", family.id, family_inv.id, description="追加配置")
+    process_buy(fam_etf2, family_510300.id, family.id)
+    fam_div_reinvest = create_inv_tx(
+        family_510300.id, "dividend", 1200, 4.00, 0, "2026-04-15", family.id, family_inv.id,
+        dividend_amount=4800.00, reinvest=True, description="分红再投资验证"
+    )
+    db.add(fam_div_reinvest)
+    db.flush()
+    reinvest_buy = InvestmentTransaction(
+        security_id=family_510300.id, type="buy", quantity=1200,
+        price=4.00, amount=4800.00, fee=0.0, date="2026-04-15",
+        ledger_id=family.id, account_id=family_inv.id,
+        linked_transaction_id=fam_div_reinvest.id,
+        description="分红再投资 - 家庭配置沪深300",
+    )
+    db.add(reinvest_buy)
+    db.flush()
+    r_cost_per = 4800.00 / 1200
+    r_lot = InvestmentLot(
+        security_id=family_510300.id, buy_transaction_id=reinvest_buy.id,
+        quantity_remaining=1200, cost_basis_per_share=r_cost_per,
+        original_quantity=1200, buy_date="2026-04-15",
+        is_closed=False, ledger_id=family.id,
+    )
+    db.add(r_lot)
+
+    db.commit()
     db.close()
 
 
@@ -221,6 +404,7 @@ app.include_router(reconciliation.router)
 app.include_router(loans.router)
 app.include_router(prediction.router)
 app.include_router(anomaly.router)
+app.include_router(portfolio.router)
 
 
 @app.get("/api/health")

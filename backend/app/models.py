@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -12,6 +13,7 @@ class Ledger(Base):
     type = Column(String(50), default="personal")
     description = Column(Text, default="")
     base_currency = Column(String(3), default="CNY")
+    cost_method = Column(String(20), default="fifo")
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -164,4 +166,57 @@ class LoanRepaymentSchedule(Base):
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
     is_early_repayment = Column(Boolean, default=False)
     early_repayment_amount = Column(Float, default=0.0)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class InvestmentSecurity(Base):
+    __tablename__ = "investment_securities"
+    __table_args__ = (
+        UniqueConstraint("ledger_id", "symbol", name="uq_security_ledger_symbol"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), nullable=False)
+    name = Column(String(200), nullable=False)
+    type = Column(String(50), default="stock")
+    currency = Column(String(3), default="CNY")
+    current_price = Column(Float, default=0.0)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class InvestmentTransaction(Base):
+    __tablename__ = "investment_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    security_id = Column(Integer, ForeignKey("investment_securities.id"), nullable=False)
+    type = Column(String(20), nullable=False)
+    quantity = Column(Float, default=0.0)
+    price = Column(Float, default=0.0)
+    amount = Column(Float, default=0.0)
+    fee = Column(Float, default=0.0)
+    date = Column(String(10), nullable=False)
+    split_ratio = Column(Float, nullable=True)
+    dividend_amount = Column(Float, nullable=True)
+    reinvest = Column(Boolean, default=False)
+    realized_gain = Column(Float, default=0.0)
+    description = Column(Text, default="")
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    linked_transaction_id = Column(Integer, ForeignKey("investment_transactions.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class InvestmentLot(Base):
+    __tablename__ = "investment_lots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    security_id = Column(Integer, ForeignKey("investment_securities.id"), nullable=False)
+    buy_transaction_id = Column(Integer, ForeignKey("investment_transactions.id"), nullable=False)
+    quantity_remaining = Column(Float, nullable=False)
+    cost_basis_per_share = Column(Float, nullable=False)
+    original_quantity = Column(Float, nullable=False)
+    buy_date = Column(String(10), nullable=False)
+    is_closed = Column(Boolean, default=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())

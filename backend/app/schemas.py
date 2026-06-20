@@ -8,6 +8,7 @@ class LedgerCreate(BaseModel):
     type: str = "personal"
     description: str = ""
     base_currency: str = "CNY"
+    cost_method: str = "fifo"
 
 
 class LedgerUpdate(BaseModel):
@@ -15,6 +16,7 @@ class LedgerUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     base_currency: Optional[str] = None
+    cost_method: Optional[str] = None
 
 
 class LedgerOut(BaseModel):
@@ -24,6 +26,7 @@ class LedgerOut(BaseModel):
     type: str
     description: str
     base_currency: str
+    cost_method: str
     created_at: datetime
 
 
@@ -763,3 +766,128 @@ class CashFlowPredictionResponse(BaseModel):
     combined_data: List[MonthlyCashFlowPoint]
     warning: CashFlowPredictionWarning
     model_description: str
+
+
+class InvestmentSecurityCreate(BaseModel):
+    symbol: str
+    name: str
+    type: str = "stock"
+    currency: str = "CNY"
+    current_price: float = 0.0
+    ledger_id: int
+
+
+class InvestmentSecurityUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    currency: Optional[str] = None
+    current_price: Optional[float] = None
+
+
+class InvestmentSecurityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    symbol: str
+    name: str
+    type: str
+    currency: str
+    current_price: float
+    ledger_id: int
+    created_at: datetime
+
+
+class InvestmentTransactionCreate(BaseModel):
+    security_id: int
+    type: str
+    quantity: float = 0.0
+    price: float = 0.0
+    fee: float = 0.0
+    date: str
+    split_ratio: Optional[float] = None
+    dividend_amount: Optional[float] = None
+    reinvest: bool = False
+    description: str = ""
+    ledger_id: int
+    account_id: int
+
+
+class InvestmentTransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    security_id: int
+    type: str
+    quantity: float
+    price: float
+    amount: float
+    fee: float
+    date: str
+    split_ratio: Optional[float] = None
+    dividend_amount: Optional[float] = None
+    reinvest: bool
+    realized_gain: float
+    description: str
+    ledger_id: int
+    account_id: int
+    linked_transaction_id: Optional[int] = None
+    created_at: datetime
+
+
+class InvestmentLotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    security_id: int
+    buy_transaction_id: int
+    quantity_remaining: float
+    cost_basis_per_share: float
+    original_quantity: float
+    buy_date: str
+    is_closed: bool
+    ledger_id: int
+    created_at: datetime
+
+
+class HoldingItem(BaseModel):
+    security_id: int
+    symbol: str
+    name: str
+    type: str
+    currency: str
+    quantity: float
+    cost_basis: float
+    avg_cost: float
+    current_price: float
+    market_value: float
+    unrealized_gain: float
+    unrealized_gain_pct: float
+    realized_gain: float
+    dividends_received: float
+    lots: List[InvestmentLotOut]
+    transactions: List[InvestmentTransactionOut]
+    converted_market_value: Optional[float] = None
+    converted_cost_basis: Optional[float] = None
+    converted_unrealized_gain: Optional[float] = None
+
+
+class PortfolioSummary(BaseModel):
+    ledger_id: int
+    base_currency: str
+    cost_method: str
+    total_market_value: float
+    total_cost_basis: float
+    total_unrealized_gain: float
+    total_unrealized_gain_pct: float
+    total_realized_gain: float
+    total_dividends: float
+    holdings: List[HoldingItem]
+
+
+class PortfolioHistoryPoint(BaseModel):
+    date: str
+    total_value: float
+    by_security: Dict[str, float]
+
+
+class PortfolioHistoryResponse(BaseModel):
+    ledger_id: int
+    base_currency: str
+    points: List[PortfolioHistoryPoint]

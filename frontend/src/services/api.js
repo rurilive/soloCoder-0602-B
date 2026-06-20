@@ -269,3 +269,18 @@ export const predictionApi = {
     return request(`/prediction/cash-flow?${qs}`);
   },
 };
+
+export const portfolioApi = {
+  listSecurities: (ledgerId) => request(`/portfolio/securities?ledger_id=${ledgerId}`),
+  createSecurity: (data) => request('/portfolio/securities', { method: 'POST', body: JSON.stringify(data) }),
+  updateSecurity: (id, data) => request(`/portfolio/securities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSecurity: (id) => request(`/portfolio/securities/${id}`, { method: 'DELETE' }),
+  listTransactions: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/portfolio/transactions${qs ? '?' + qs : ''}`);
+  },
+  createTransaction: (data) => request('/portfolio/transactions', { method: 'POST', body: JSON.stringify(data) }),
+  getSummary: (ledgerId) => request(`/portfolio/summary?ledger_id=${ledgerId}`),
+  getHistory: (ledgerId, days = 90) => request(`/portfolio/history?ledger_id=${ledgerId}&days=${days}`),
+  getLots: (securityId) => request(`/portfolio/lots/${securityId}`),
+};
