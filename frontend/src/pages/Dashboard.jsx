@@ -521,17 +521,43 @@ export default function Dashboard({ currentLedger }) {
       time: 'purple',
     };
 
-    const anomalyBgColor = {
+    const anomalyStripeColor = {
+      amount: '#ffd591',
+      frequency: '#91d5ff',
+      time: '#d3adf7',
+    };
+
+    const anomalyBaseColor = {
       amount: '#fff7e6',
       frequency: '#e6f7ff',
       time: '#f9f0ff',
     };
 
-    const getRowBgColor = (record) => {
-      if (record.anomaly_types.includes('amount')) return anomalyBgColor.amount;
-      if (record.anomaly_types.includes('frequency')) return anomalyBgColor.frequency;
-      if (record.anomaly_types.includes('time')) return anomalyBgColor.time;
-      return undefined;
+    const getRowBgStyle = (record) => {
+      const types = record.anomaly_types;
+      if (types.length === 0) return undefined;
+      if (types.length === 1) {
+        return { backgroundColor: anomalyBaseColor[types[0]] };
+      }
+      const colors = types.map((t) => anomalyStripeColor[t]);
+      const baseColor = anomalyBaseColor[types[0]];
+      const stripeWidth = 12;
+      const gradientParts = [];
+      let current = 0;
+      colors.forEach((color, idx) => {
+        const start = idx * stripeWidth;
+        const end = (idx + 1) * stripeWidth;
+        gradientParts.push(`${color} ${start}px, ${color} ${end}px`);
+        current = end;
+      });
+      const totalWidth = colors.length * stripeWidth;
+      const backgroundImage = `repeating-linear-gradient(90deg, ${gradientParts.join(', ')})`;
+      const backgroundSize = `${totalWidth}px 100%`;
+      return {
+        backgroundImage,
+        backgroundSize,
+        backgroundColor: baseColor,
+      };
     };
 
     const anomalyColumns = [
@@ -616,13 +642,11 @@ export default function Dashboard({ currentLedger }) {
               size="small"
               pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 笔异常交易` }}
               rowClassName={(record) => {
-                if (record.anomaly_types.includes('amount')) return 'anomaly-row-amount';
-                if (record.anomaly_types.includes('frequency')) return 'anomaly-row-frequency';
-                if (record.anomaly_types.includes('time')) return 'anomaly-row-time';
-                return '';
+                const classes = record.anomaly_types.map((t) => `anomaly-row-${t}`).join(' ');
+                return classes;
               }}
               onRow={(record) => ({
-                style: { backgroundColor: getRowBgColor(record) },
+                style: getRowBgStyle(record),
               })}
             />
           </div>

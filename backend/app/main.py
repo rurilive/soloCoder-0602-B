@@ -128,6 +128,7 @@ def seed_db():
         Transaction(amount=89, type="expense", description="零食", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
         Transaction(amount=312, type="expense", description="晚餐", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
         Transaction(amount=178, type="expense", description="水果", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=32000, type="expense", description="同日大额可疑交易", category_id=6, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-11"),
         Transaction(amount=2500, type="expense", description="深夜大额消费", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-13"),
         Transaction(amount=3200, type="expense", description="周末异常消费", category_id=6, ledger_id=personal.id, account_id=alipay.id, date="2026-06-14"),
         Transaction(amount=1800, type="expense", description="非工作日支出", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-14"),

@@ -30,27 +30,39 @@ def _month_range(year: int, month: int):
 def _detect_amount_iqr(transactions):
     if len(transactions) < 4:
         return {}
-    amounts = sorted([abs(float(t.amount)) for t in transactions])
-    n = len(amounts)
-    q1_idx = n // 4
-    q3_idx = (3 * n) // 4
-    q1 = amounts[q1_idx]
-    q3 = amounts[q3_idx]
-    iqr = q3 - q1
-    if iqr == 0:
-        return {}
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
-    scores = {}
-    for t in transactions:
-        amt = abs(float(t.amount))
-        if amt < lower:
-            dist = (lower - amt) / iqr
-            scores[t.id] = min(round(dist, 2), 10.0)
-        elif amt > upper:
-            dist = (amt - upper) / iqr
-            scores[t.id] = min(round(dist, 2), 10.0)
-    return scores
+
+    def _iqr_detect(txs):
+        if len(txs) < 4:
+            return {}
+        amounts = sorted([abs(float(t.amount)) for t in txs])
+        n = len(amounts)
+        q1_idx = n // 4
+        q3_idx = (3 * n) // 4
+        q1 = amounts[q1_idx]
+        q3 = amounts[q3_idx]
+        iqr = q3 - q1
+        if iqr == 0:
+            return {}
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        scores = {}
+        for t in txs:
+            amt = abs(float(t.amount))
+            if amt < lower:
+                dist = (lower - amt) / iqr
+                scores[t.id] = min(round(dist, 2), 10.0)
+            elif amt > upper:
+                dist = (amt - upper) / iqr
+                scores[t.id] = min(round(dist, 2), 10.0)
+        return scores
+
+    expense_txs = [t for t in transactions if t.type == "expense"]
+    income_txs = [t for t in transactions if t.type == "income"]
+
+    all_scores = {}
+    all_scores.update(_iqr_detect(expense_txs))
+    all_scores.update(_iqr_detect(income_txs))
+    return all_scores
 
 
 def _detect_frequency_zscore(transactions):
@@ -82,6 +94,7 @@ def _detect_time_anomaly(transactions):
     if len(transactions) < 4:
         return {}
     sorted_txs = sorted(transactions, key=lambda t: t.date)
+
     dow_counts = defaultdict(int)
     for t in sorted_txs:
         try:
@@ -98,9 +111,9 @@ def _detect_time_anomaly(transactions):
     if std_dow > 0:
         for dow, cnt in dow_counts.items():
             z = (cnt - mean_dow) / std_dow
-            if z > 1.0:
+            if z > 2.0:
                 unusual_dows.add(dow)
-    weekend_dows = {5, 6}
+
     intervals = []
     for i in range(1, len(sorted_txs)):
         try:
@@ -111,14 +124,39 @@ def _detect_time_anomaly(transactions):
                 intervals.append(gap)
         except (ValueError, TypeError):
             pass
+
     short_interval_threshold = None
-    mean_interval = 0
-    std_interval = 0
-    if len(intervals) >= 2:
-        mean_interval = stats_mod.mean(intervals)
-        std_interval = stats_mod.stdev(intervals)
-        if std_interval > 0:
-            short_interval_threshold = max(0, mean_interval - 1.0 * std_interval)
+    long_interval_threshold = None
+    if len(intervals) >= 4:
+        sorted_intervals = sorted(intervals)
+        n = len(sorted_intervals)
+        q1_idx = n // 4
+        q3_idx = (3 * n) // 4
+        q1 = sorted_intervals[q1_idx]
+        q3 = sorted_intervals[q3_idx]
+        iqr = q3 - q1
+        if iqr > 0:
+            short_interval_threshold = max(0, q1 - 1.5 * iqr)
+            long_interval_threshold = q3 + 1.5 * iqr
+
+    day_counts = defaultdict(int)
+    for t in sorted_txs:
+        day_counts[t.date] += 1
+    count_values = sorted(day_counts.values())
+    unusual_days = set()
+    if len(count_values) >= 4:
+        n = len(count_values)
+        q1_idx = n // 4
+        q3_idx = (3 * n) // 4
+        q1 = count_values[q1_idx]
+        q3 = count_values[q3_idx]
+        iqr = q3 - q1
+        if iqr > 0:
+            upper = q3 + 1.5 * iqr
+            for d, c in day_counts.items():
+                if c > upper:
+                    unusual_days.add(d)
+
     scores = {}
     for t in sorted_txs:
         score = 0.0
@@ -127,22 +165,53 @@ def _detect_time_anomaly(transactions):
             if dt.weekday() in unusual_dows and std_dow > 0:
                 z = (dow_counts[dt.weekday()] - mean_dow) / std_dow
                 score += min(z, 5.0)
-            if dt.weekday() in weekend_dows and abs(float(t.amount)) > 1000:
-                score += 2.0
         except (ValueError, TypeError):
             pass
-        if short_interval_threshold is not None:
+
+        if t.date in unusual_days:
+            c = day_counts[t.date]
+            if len(count_values) >= 4:
+                n = len(count_values)
+                q3_idx = (3 * n) // 4
+                q3 = count_values[q3_idx]
+                q1_idx = n // 4
+                q1 = count_values[q1_idx]
+                iqr = max(q3 - q1, 1)
+                dev = (c - q3) / iqr
+                score += min(dev * 2.0, 5.0)
+            else:
+                score += 2.0
+
+        if short_interval_threshold is not None or long_interval_threshold is not None:
             idx = next((i for i, s in enumerate(sorted_txs) if s.id == t.id), None)
-            if idx is not None and idx > 0:
-                try:
-                    prev = date.fromisoformat(sorted_txs[idx - 1].date)
-                    curr = date.fromisoformat(t.date)
-                    gap = (curr - prev).days
-                    if 0 < gap < short_interval_threshold:
-                        z = (mean_interval - gap) / std_interval if std_interval > 0 else 1.0
-                        score += min(z, 5.0)
-                except (ValueError, TypeError):
-                    pass
+            if idx is not None:
+                if idx > 0 and short_interval_threshold is not None:
+                    try:
+                        prev = date.fromisoformat(sorted_txs[idx - 1].date)
+                        curr = date.fromisoformat(t.date)
+                        gap = (curr - prev).days
+                        if 0 < gap < short_interval_threshold:
+                            n_int = len(sorted_intervals)
+                            q1_int = sorted_intervals[n_int // 4]
+                            iqr_int = sorted_intervals[(3 * n_int) // 4] - q1_int
+                            dev = (short_interval_threshold - gap) / max(iqr_int, 1)
+                            score += min(dev * 2.0, 5.0)
+                    except (ValueError, TypeError):
+                        pass
+                if idx < len(sorted_txs) - 1 and long_interval_threshold is not None:
+                    try:
+                        curr = date.fromisoformat(t.date)
+                        nxt = date.fromisoformat(sorted_txs[idx + 1].date)
+                        gap = (nxt - curr).days
+                        if gap > long_interval_threshold:
+                            n_int = len(sorted_intervals)
+                            q3_int = sorted_intervals[(3 * n_int) // 4]
+                            iqr_int = q3_int - sorted_intervals[n_int // 4]
+                            dev = (gap - long_interval_threshold) / max(iqr_int, 1)
+                            score += min(dev * 2.0, 5.0)
+                    except (ValueError, TypeError):
+                        pass
+
         if score > 0:
             scores[t.id] = round(score, 2)
     return scores
