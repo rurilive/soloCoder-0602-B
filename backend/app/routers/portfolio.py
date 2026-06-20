@@ -164,6 +164,13 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
             lot.is_closed = True
         remaining_qty -= sell_from_lot
 
+    remaining_open_lots = [
+        l for l in open_lots if not l.is_closed and l.quantity_remaining > 1e-9
+    ]
+    if remaining_open_lots:
+        for lot in remaining_open_lots:
+            lot.cost_basis_per_share = avg_cost
+
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - cost_sold
     tx.realized_gain = _round2(realized_gain)
@@ -426,10 +433,6 @@ def get_portfolio_summary(
             t.dividend_amount or 0.0
             for t in transactions
             if t.type == "dividend" and not t.reinvest
-        )
-        dividends_received += sum(
-            t.amount for t in transactions if t.type == "dividend" and not t.reinvest
-            and t.dividend_amount is None
         )
 
         converted_market_value = None
