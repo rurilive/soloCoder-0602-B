@@ -114,7 +114,7 @@ export default function Dashboard({ currentLedger }) {
                 {total_score}
                 <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>/ 100</Text>
               </Title>
-              <Space orientation="vertical" size={0} style={{ marginTop: 4 }}>
+              <Space direction="vertical" size={0} style={{ marginTop: 4 }}>
                 <Tag color={level_color} style={{ fontSize: 14, padding: '2px 12px' }}>
                   <RiseOutlined /> {level}
                 </Tag>
@@ -125,7 +125,7 @@ export default function Dashboard({ currentLedger }) {
             </div>
           </Col>
           <Col span={16}>
-            <Space orientation="vertical" size={4} style={{ width: '100%' }}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
               <Text style={{ fontSize: 15, fontWeight: 500 }}>{level_description}</Text>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {healthScoreExpanded ? '点击收起明细 ▲' : '点击查看各维度得分明细 ▼'}
@@ -361,7 +361,7 @@ export default function Dashboard({ currentLedger }) {
           <div style={{ marginTop: 20, borderTop: '1px solid #f0f0f0', paddingTop: 20 }} onClick={(e) => e.stopPropagation()}>
             {warning?.has_warning && (
               <Alert
-                title={`现金流风险预警：预测${warning.consecutive_negative_months}个月连续负现金流`}
+                message={`现金流风险预警：预测${warning.consecutive_negative_months}个月连续负现金流`}
                 description={
                   <div>
                     <Paragraph style={{ marginBottom: 8 }}>
@@ -388,7 +388,7 @@ export default function Dashboard({ currentLedger }) {
 
             {!warning?.has_warning && warning?.suggestions && warning.suggestions.length > 0 && (
               <Alert
-                title="财务状况健康"
+                message="财务状况健康"
                 description={
                   <List
                     size="small"
@@ -473,7 +473,7 @@ export default function Dashboard({ currentLedger }) {
                     {model_description}
                   </Paragraph>
                   <Title level={5} style={{ marginBottom: 8 }}>图例说明</Title>
-                  <Space orientation="vertical" size="small" style={{ fontSize: 12 }}>
+                  <Space direction="vertical" size="small" style={{ fontSize: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 20, height: 2, background: '#52c41a' }}></div>
                       <span>收入（实线为实际，虚线为预测）</span>
