@@ -171,6 +171,20 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
         for lot in remaining_open_lots:
             lot.cost_basis_per_share = avg_cost
 
+    remaining_total_cost = sum(
+        l.quantity_remaining * l.cost_basis_per_share for l in remaining_open_lots
+    )
+    expected_remaining_cost = total_cost - cost_sold
+    if abs(remaining_total_cost - expected_remaining_cost) > 0.01:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"加权平均卖出后总成本不守恒："
+                f"剩余总成本{remaining_total_cost:.2f} != "
+                f"原总成本{total_cost:.2f} - 卖出成本{cost_sold:.2f} = {expected_remaining_cost:.2f}"
+            ),
+        )
+
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - cost_sold
     tx.realized_gain = _round2(realized_gain)
@@ -432,7 +446,7 @@ def get_portfolio_summary(
         dividends_received = sum(
             t.dividend_amount or 0.0
             for t in transactions
-            if t.type == "dividend" and not t.reinvest
+            if t.type == "dividend"
         )
 
         converted_market_value = None
