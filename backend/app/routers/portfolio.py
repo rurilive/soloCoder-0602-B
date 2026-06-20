@@ -171,23 +171,13 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
 
     tx.raw_short_gain = _round2(short_gain)
     tx.raw_long_gain = _round2(long_gain)
-
-    net_short = short_gain
-    net_long = long_gain
-    taxable_short = max(0.0, net_short)
-    taxable_long = max(0.0, net_long)
-    if net_short < 0:
-        taxable_long = max(0.0, net_long + net_short)
-    if net_long < 0 and net_short > 0:
-        taxable_short = max(0.0, net_short + net_long)
-
-    tax_short = taxable_short * SHORT_TERM_RATE
-    tax_long = taxable_long * LONG_TERM_RATE
+    tx.taxable_gain_short = _round2(short_gain)
+    tx.taxable_gain_long = _round2(long_gain)
 
     tx.realized_gain = _round2(realized_gain)
-    tx.taxable_gain_short = _round2(taxable_short)
-    tx.taxable_gain_long = _round2(taxable_long)
-    tx.tax_amount_capital = _round2(tax_short + tax_long)
+    tx.tax_amount_capital = _round2(
+        max(0.0, short_gain) * SHORT_TERM_RATE + max(0.0, long_gain) * LONG_TERM_RATE
+    )
     db.flush()
 
 
@@ -291,23 +281,13 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
 
     tx.raw_short_gain = _round2(short_gain)
     tx.raw_long_gain = _round2(long_gain)
-
-    net_short = short_gain
-    net_long = long_gain
-    taxable_short = max(0.0, net_short)
-    taxable_long = max(0.0, net_long)
-    if net_short < 0:
-        taxable_long = max(0.0, net_long + net_short)
-    if net_long < 0 and net_short > 0:
-        taxable_short = max(0.0, net_short + net_long)
-
-    tax_short = taxable_short * SHORT_TERM_RATE
-    tax_long = taxable_long * LONG_TERM_RATE
+    tx.taxable_gain_short = _round2(short_gain)
+    tx.taxable_gain_long = _round2(long_gain)
 
     tx.realized_gain = _round2(realized_gain)
-    tx.taxable_gain_short = _round2(taxable_short)
-    tx.taxable_gain_long = _round2(taxable_long)
-    tx.tax_amount_capital = _round2(tax_short + tax_long)
+    tx.tax_amount_capital = _round2(
+        max(0.0, short_gain) * SHORT_TERM_RATE + max(0.0, long_gain) * LONG_TERM_RATE
+    )
     db.flush()
 
 
@@ -867,21 +847,12 @@ def get_tax_summary(
         m_sell_txs = [tx for tx in sell_txs if m_start <= tx.date < m_end]
         m_div_txs = [tx for tx in div_txs if m_start <= tx.date < m_end]
 
-        m_raw_short = sum(tx.raw_short_gain for tx in m_sell_txs)
-        m_raw_long = sum(tx.raw_long_gain for tx in m_sell_txs)
-
-        m_net_short = m_raw_short
-        m_net_long = m_raw_long
-        m_short = max(0.0, m_net_short)
-        m_long = max(0.0, m_net_long)
-        if m_net_short < 0:
-            m_long = max(0.0, m_net_long + m_net_short)
-        if m_net_long < 0 and m_net_short > 0:
-            m_short = max(0.0, m_net_short + m_net_long)
+        m_short = sum(tx.raw_short_gain for tx in m_sell_txs)
+        m_long = sum(tx.raw_long_gain for tx in m_sell_txs)
 
         m_div_income = sum(tx.dividend_amount or 0.0 for tx in m_div_txs)
         m_div_tax = sum(tx.dividend_tax for tx in m_div_txs)
-        m_cap_tax = _round2(m_short * SHORT_TERM_RATE + m_long * LONG_TERM_RATE)
+        m_cap_tax = _round2(max(0.0, m_short) * SHORT_TERM_RATE + max(0.0, m_long) * LONG_TERM_RATE)
 
         monthly_calendar.append(MonthlyTaxCalendarItem(
             year=year,
