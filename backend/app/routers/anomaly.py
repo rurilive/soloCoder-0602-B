@@ -95,14 +95,18 @@ def _detect_time_anomaly(transactions):
         return {}
     sorted_txs = sorted(transactions, key=lambda t: t.date)
     tx_index = {t.id: i for i, t in enumerate(sorted_txs)}
+    tx_dates = {}
+    for t in sorted_txs:
+        try:
+            tx_dates[t.id] = date.fromisoformat(t.date)
+        except (ValueError, TypeError):
+            pass
 
     dow_counts = defaultdict(int)
     for t in sorted_txs:
-        try:
-            dt = date.fromisoformat(t.date)
+        dt = tx_dates.get(t.id)
+        if dt is not None:
             dow_counts[dt.weekday()] += 1
-        except (ValueError, TypeError):
-            pass
     if not dow_counts:
         return {}
     dow_values = list(dow_counts.values())
@@ -115,16 +119,12 @@ def _detect_time_anomaly(transactions):
             if z > 2.0:
                 unusual_dows.add(dow)
 
+    sorted_date_objs = [tx_dates[t.id] for t in sorted_txs if t.id in tx_dates]
     intervals = []
-    for i in range(1, len(sorted_txs)):
-        try:
-            d1 = date.fromisoformat(sorted_txs[i - 1].date)
-            d2 = date.fromisoformat(sorted_txs[i].date)
-            gap = (d2 - d1).days
-            if gap > 0:
-                intervals.append(gap)
-        except (ValueError, TypeError):
-            pass
+    for i in range(1, len(sorted_date_objs)):
+        gap = (sorted_date_objs[i] - sorted_date_objs[i - 1]).days
+        if gap > 0:
+            intervals.append(gap)
 
     short_interval_threshold = None
     long_interval_threshold = None
@@ -143,14 +143,13 @@ def _detect_time_anomaly(transactions):
 
     scores = {}
     for t in sorted_txs:
+        dt = tx_dates.get(t.id)
+        if dt is None:
+            continue
         score = 0.0
-        try:
-            dt = date.fromisoformat(t.date)
-            if dt.weekday() in unusual_dows and std_dow > 0:
-                z = (dow_counts[dt.weekday()] - mean_dow) / std_dow
-                score += min(z, 5.0)
-        except (ValueError, TypeError):
-            pass
+        if dt.weekday() in unusual_dows and std_dow > 0:
+            z = (dow_counts[dt.weekday()] - mean_dow) / std_dow
+            score += min(z, 5.0)
 
         if short_interval_threshold is not None or long_interval_threshold is not None:
             idx = tx_index.get(t.id)
@@ -160,25 +159,19 @@ def _detect_time_anomaly(transactions):
                 q3_int = sorted_intervals[(3 * n_int) // 4]
                 iqr_int = max(q3_int - q1_int, 1)
                 if idx > 0 and short_interval_threshold is not None:
-                    try:
-                        prev = date.fromisoformat(sorted_txs[idx - 1].date)
-                        curr = date.fromisoformat(t.date)
-                        gap = (curr - prev).days
+                    prev_dt = tx_dates.get(sorted_txs[idx - 1].id)
+                    if prev_dt is not None:
+                        gap = (dt - prev_dt).days
                         if 0 < gap < short_interval_threshold:
                             dev = (short_interval_threshold - gap) / iqr_int
                             score += min(dev * 2.0, 5.0)
-                    except (ValueError, TypeError):
-                        pass
                 if idx < len(sorted_txs) - 1 and long_interval_threshold is not None:
-                    try:
-                        curr = date.fromisoformat(t.date)
-                        nxt = date.fromisoformat(sorted_txs[idx + 1].date)
-                        gap = (nxt - curr).days
+                    nxt_dt = tx_dates.get(sorted_txs[idx + 1].id)
+                    if nxt_dt is not None:
+                        gap = (nxt_dt - dt).days
                         if gap > long_interval_threshold:
                             dev = (gap - long_interval_threshold) / iqr_int
                             score += min(dev * 2.0, 5.0)
-                    except (ValueError, TypeError):
-                        pass
 
         if score > 0:
             scores[t.id] = round(score, 2)
