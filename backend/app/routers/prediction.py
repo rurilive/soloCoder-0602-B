@@ -329,7 +329,7 @@ def predict_cash_flow(
             consecutive_negative += 1
             if temp_first is None:
                 temp_first = point.label
-            if consecutive_negative > max_consecutive:
+            if consecutive_negative >= max_consecutive:
                 max_consecutive = consecutive_negative
                 max_first = temp_first
                 max_last = point.label
