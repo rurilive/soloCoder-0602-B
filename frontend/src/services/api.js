@@ -259,6 +259,10 @@ export const financialHealthApi = {
   getScore: (ledgerId) => request(`/financial-health/score?ledger_id=${ledgerId}`),
 };
 
+export const anomalyApi = {
+  detect: (ledgerId) => request(`/anomaly/detect?ledger_id=${ledgerId}`),
+};
+
 export const predictionApi = {
   getCashFlow: (params) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();

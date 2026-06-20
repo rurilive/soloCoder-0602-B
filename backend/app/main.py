@@ -11,7 +11,7 @@ from typing import Optional, List
 
 from app.database import engine, SessionLocal, Base, get_db
 from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
 
@@ -117,6 +117,26 @@ def seed_db():
     db.add_all(historical_txs_family)
     db.commit()
 
+    anomaly_test_txs = [
+        Transaction(amount=28000, type="expense", description="大额奢侈品消费", category_id=6, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-12"),
+        Transaction(amount=35000, type="expense", description="可疑大额转账", category_id=6, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-14"),
+        Transaction(amount=42000, type="expense", description="异常高额消费", category_id=6, ledger_id=personal.id, account_id=alipay.id, date="2026-06-15"),
+        Transaction(amount=50000, type="expense", description="未授权大额支出", category_id=6, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-16"),
+        Transaction(amount=88, type="expense", description="小额餐饮", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=156, type="expense", description="咖啡", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=234, type="expense", description="午餐", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=89, type="expense", description="零食", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=312, type="expense", description="晚餐", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=178, type="expense", description="水果", category_id=4, ledger_id=personal.id, account_id=cash.id, date="2026-06-11"),
+        Transaction(amount=2500, type="expense", description="深夜大额消费", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-13"),
+        Transaction(amount=3200, type="expense", description="周末异常消费", category_id=6, ledger_id=personal.id, account_id=alipay.id, date="2026-06-14"),
+        Transaction(amount=1800, type="expense", description="非工作日支出", category_id=7, ledger_id=personal.id, account_id=alipay.id, date="2026-06-14"),
+        Transaction(amount=15000, type="income", description="5月工资", category_id=1, ledger_id=personal.id, account_id=bank_card.id, date="2026-05-01"),
+        Transaction(amount=15000, type="income", description="4月工资", category_id=1, ledger_id=personal.id, account_id=bank_card.id, date="2026-04-01"),
+    ]
+    db.add_all(anomaly_test_txs)
+    db.commit()
+
     sample_loan = Loan(
         name="车贷", principal=100000, annual_rate=4.5, term_months=36,
         amortization_type="equal_payment", start_date="2026-01-01",
@@ -199,6 +219,7 @@ app.include_router(exchange_rates.router)
 app.include_router(reconciliation.router)
 app.include_router(loans.router)
 app.include_router(prediction.router)
+app.include_router(anomaly.router)
 
 
 @app.get("/api/health")

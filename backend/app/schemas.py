@@ -721,6 +721,30 @@ class MonthlyCashFlowPoint(BaseModel):
     confidence_level: Optional[float] = None
 
 
+class AnomalyTransactionItem(BaseModel):
+    transaction_id: int
+    date: str
+    description: str
+    amount: float
+    type: str
+    category_name: str
+    anomaly_types: List[str]
+    amount_score: float = 0.0
+    frequency_score: float = 0.0
+    time_score: float = 0.0
+    total_score: float
+
+
+class AnomalyDetectionResponse(BaseModel):
+    ledger_id: int
+    total_transactions: int
+    anomaly_count: int
+    amount_anomaly_count: int
+    frequency_anomaly_count: int
+    time_anomaly_count: int
+    anomalies: List[AnomalyTransactionItem]
+
+
 class CashFlowPredictionWarning(BaseModel):
     has_warning: bool
     consecutive_negative_months: int

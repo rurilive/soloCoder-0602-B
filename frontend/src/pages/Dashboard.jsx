@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Table, Tag, Spin, Select, Space, Progress, List, Typography, Tooltip, Alert } from 'antd';
-import { ArrowUpOutlined, ArrowDownOutlined, WalletOutlined, RiseOutlined, BulbOutlined, WarningOutlined, InfoCircleOutlined, LineChartOutlined } from '@ant-design/icons';
+import { ArrowUpOutlined, ArrowDownOutlined, WalletOutlined, RiseOutlined, BulbOutlined, WarningOutlined, InfoCircleOutlined, LineChartOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { Pie, Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
-import { transactionApi, statisticsApi, accountApi, CURRENCY_OPTIONS, formatCurrency, financialHealthApi, predictionApi } from '../services/api';
+import { transactionApi, statisticsApi, accountApi, CURRENCY_OPTIONS, formatCurrency, financialHealthApi, predictionApi, anomalyApi } from '../services/api';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -18,6 +18,8 @@ export default function Dashboard({ currentLedger }) {
   const [healthScoreExpanded, setHealthScoreExpanded] = useState(false);
   const [predictionData, setPredictionData] = useState(null);
   const [predictionExpanded, setPredictionExpanded] = useState(true);
+  const [anomalyData, setAnomalyData] = useState(null);
+  const [anomalyExpanded, setAnomalyExpanded] = useState(true);
 
   const baseCurrency = currentLedger?.base_currency || 'CNY';
 
@@ -37,7 +39,7 @@ export default function Dashboard({ currentLedger }) {
         if (displayCurrency) {
           params.target_currency = displayCurrency;
         }
-        const [s, txs, cats, accs, hs, pred] = await Promise.all([
+        const [s, txs, cats, accs, hs, pred, anom] = await Promise.all([
           statisticsApi.monthly(params),
           transactionApi.list({ ledger_id: currentLedger.id, year: now.year(), month: now.month() + 1 }),
           statisticsApi.categories({ ...params, type: 'expense' }),
@@ -49,6 +51,7 @@ export default function Dashboard({ currentLedger }) {
             predicted_months: 6,
             target_currency: displayCurrency || currentLedger.base_currency,
           }),
+          anomalyApi.detect(currentLedger.id),
         ]);
         setSummary(s);
         setRecentTx(txs.slice(0, 5));
@@ -56,6 +59,7 @@ export default function Dashboard({ currentLedger }) {
         setAccounts(accs);
         setHealthScore(hs);
         setPredictionData(pred);
+        setAnomalyData(anom);
       } finally {
         setLoading(false);
       }
@@ -500,6 +504,133 @@ export default function Dashboard({ currentLedger }) {
     );
   };
 
+  const renderAnomalyPanel = () => {
+    if (!anomalyData || anomalyData.anomaly_count === 0) return null;
+
+    const { anomalies, amount_anomaly_count, frequency_anomaly_count, time_anomaly_count, total_transactions } = anomalyData;
+
+    const anomalyTypeLabel = {
+      amount: '金额异常',
+      frequency: '频率异常',
+      time: '时间异常',
+    };
+
+    const anomalyTypeColor = {
+      amount: 'orange',
+      frequency: 'blue',
+      time: 'purple',
+    };
+
+    const anomalyBgColor = {
+      amount: '#fff7e6',
+      frequency: '#e6f7ff',
+      time: '#f9f0ff',
+    };
+
+    const getRowBgColor = (record) => {
+      if (record.anomaly_types.includes('amount')) return anomalyBgColor.amount;
+      if (record.anomaly_types.includes('frequency')) return anomalyBgColor.frequency;
+      if (record.anomaly_types.includes('time')) return anomalyBgColor.time;
+      return undefined;
+    };
+
+    const anomalyColumns = [
+      {
+        title: '日期', dataIndex: 'date', key: 'date', width: 110,
+      },
+      {
+        title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
+      },
+      {
+        title: '金额', dataIndex: 'amount', key: 'amount', width: 120, align: 'right',
+        render: (v, r) => (
+          <span style={{ color: r.type === 'income' ? '#3f8600' : '#cf1322', fontWeight: 500 }}>
+            {r.type === 'income' ? '+' : '-'}{formatCurrency(v, baseCurrency)}
+          </span>
+        ),
+      },
+      {
+        title: '异常类型', dataIndex: 'anomaly_types', key: 'anomaly_types', width: 200,
+        render: (types) => (
+          <Space size={4}>
+            {types.map((t) => (
+              <Tag key={t} color={anomalyTypeColor[t]}>{anomalyTypeLabel[t]}</Tag>
+            ))}
+          </Space>
+        ),
+      },
+      {
+        title: '异常分数', dataIndex: 'total_score', key: 'total_score', width: 100, align: 'center',
+        sorter: (a, b) => a.total_score - b.total_score,
+        defaultSortOrder: 'descend',
+        render: (v) => (
+          <Text strong style={{ color: v >= 5 ? '#f5222d' : v >= 3 ? '#fa8c16' : '#faad14' }}>
+            {v.toFixed(2)}
+          </Text>
+        ),
+      },
+    ];
+
+    return (
+      <Card
+        style={{ marginBottom: 24, cursor: 'pointer', borderLeft: '4px solid #722ed1' }}
+        onClick={() => setAnomalyExpanded(!anomalyExpanded)}
+        hoverable
+      >
+        <Row gutter={16} align="middle">
+          <Col span={24}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <SafetyCertificateOutlined style={{ fontSize: 20, color: '#722ed1' }} />
+                <Title level={4} style={{ margin: 0 }}>
+                  智能异常交易检测
+                </Title>
+                <Tag color="red">{anomalies.length}笔异常</Tag>
+                <Tag color="orange">金额异常 {amount_anomaly_count}</Tag>
+                <Tag color="blue">频率异常 {frequency_anomaly_count}</Tag>
+                <Tag color="purple">时间异常 {time_anomaly_count}</Tag>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {anomalyExpanded ? '点击收起 ▲' : '点击展开查看详情 ▼'}
+              </Text>
+            </div>
+          </Col>
+        </Row>
+
+        {anomalyExpanded && (
+          <div style={{ marginTop: 20, borderTop: '1px solid #f0f0f0', paddingTop: 20 }} onClick={(e) => e.stopPropagation()}>
+            {amount_anomaly_count >= 3 && (
+              <Alert
+                message="金额异常风险提示"
+                description={`检测到 ${amount_anomaly_count} 笔金额异常交易，可能存在异常支出或未授权交易，请仔细核实这些交易的合理性。`}
+                type="warning"
+                showIcon
+                icon={<WarningOutlined />}
+                style={{ marginBottom: 16 }}
+              />
+            )}
+            <Table
+              columns={anomalyColumns}
+              dataSource={anomalies}
+              rowKey="transaction_id"
+              size="small"
+              pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 笔异常交易` }}
+              rowClassName={(record) => {
+                if (record.anomaly_types.includes('amount')) return 'anomaly-row-amount';
+                if (record.anomaly_types.includes('frequency')) return 'anomaly-row-frequency';
+                if (record.anomaly_types.includes('time')) return 'anomaly-row-time';
+                return '';
+              }}
+              onRow={(record) => ({
+                style: { backgroundColor: getRowBgColor(record) },
+              })}
+            />
+          </div>
+        )}
+      </Card>
+    );
+  };
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -520,6 +651,8 @@ export default function Dashboard({ currentLedger }) {
       {renderHealthCard()}
 
       {renderCashFlowPrediction()}
+
+      {renderAnomalyPanel()}
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
