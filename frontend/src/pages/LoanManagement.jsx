@@ -34,10 +34,11 @@ import {
   FallOutlined,
   MinusOutlined,
   DeleteOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
-import { loanApi, categoryApi, accountApi, formatCurrency } from '../services/api';
+import { loanApi, categoryApi, accountApi, formatCurrency, exportApi } from '../services/api';
 
 const amortizationOptions = [
   { value: 'equal_principal', label: '等额本金（每月本金固定，利息递减）' },
@@ -415,6 +416,17 @@ export default function LoanManagement({ currentLedger }) {
     }
   };
 
+  const handleExportSchedule = async () => {
+    if (!selectedLoan) return;
+    try {
+      message.loading({ content: '正在导出...', key: 'export' });
+      await exportApi.loanSchedule(selectedLoan.id);
+      message.success({ content: '导出成功', key: 'export' });
+    } catch (e) {
+      message.error({ content: '导出失败: ' + e.message, key: 'export' });
+    }
+  };
+
   const loanColumns = [
     { title: '贷款名称', dataIndex: 'name', key: 'name', width: 140 },
     {
@@ -763,6 +775,9 @@ export default function LoanManagement({ currentLedger }) {
                 ),
                 children: (
                   <div>
+                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button icon={<DownloadOutlined />} onClick={handleExportSchedule}>导出CSV</Button>
+                    </div>
                     <Card
                       size="small"
                       style={{ marginBottom: 16 }}

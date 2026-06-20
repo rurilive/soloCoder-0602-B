@@ -208,3 +208,38 @@ export const loanApi = {
   getRemainingPrincipal: (id) => request(`/loans/${id}/remaining-principal`),
   simulateRateChange: (data, signal) => request('/loans/rate-change/simulation', { method: 'POST', body: JSON.stringify(data), signal }),
 };
+
+async function downloadRequest(url) {
+  const res = await fetch(BASE + url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '下载失败');
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename=(.+)$/);
+  const filename = match ? match[1].replace(/["']/g, '') : 'export.csv';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+export const exportApi = {
+  transactions: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return downloadRequest(`/export/transactions${qs ? '?' + qs : ''}`);
+  },
+  monthlyReport: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return downloadRequest(`/export/monthly-report${qs ? '?' + qs : ''}`);
+  },
+  loanSchedule: (loanId) => downloadRequest(`/export/loan-schedule?loan_id=${loanId}`),
+};
+
+export const financialHealthApi = {
+  getScore: (ledgerId) => request(`/financial-health/score?ledger_id=${ledgerId}`),
+};

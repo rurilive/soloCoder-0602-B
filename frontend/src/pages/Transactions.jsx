@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Tag, Space, Popconfirm, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { transactionApi, categoryApi, accountApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency } from '../services/api';
+import { transactionApi, categoryApi, accountApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency, exportApi } from '../services/api';
 
 export default function Transactions({ currentLedger }) {
   const [data, setData] = useState([]);
@@ -53,6 +53,21 @@ export default function Transactions({ currentLedger }) {
     await transactionApi.delete(id);
     message.success('删除成功');
     fetchData();
+  };
+
+  const handleExport = async () => {
+    if (!currentLedger) return;
+    try {
+      message.loading({ content: '正在导出...', key: 'export' });
+      await exportApi.transactions({
+        ledger_id: currentLedger.id,
+        year: filterMonth.year(),
+        month: filterMonth.month() + 1,
+      });
+      message.success({ content: '导出成功', key: 'export' });
+    } catch (e) {
+      message.error({ content: '导出失败: ' + e.message, key: 'export' });
+    }
   };
 
   const openEdit = (record) => {
@@ -134,7 +149,10 @@ export default function Transactions({ currentLedger }) {
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <DatePicker picker="month" value={filterMonth} onChange={setFilterMonth} allowClear={false} />
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加记录</Button>
+        <Space>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出CSV</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加记录</Button>
+        </Space>
       </div>
       <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ pageSize: 15 }} />
       <Modal title={editItem ? '编辑记录' : '添加记录'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditItem(null); }} destroyOnClose>

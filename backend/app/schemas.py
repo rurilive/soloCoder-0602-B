@@ -681,3 +681,24 @@ class RateChangeSimulationResponse(BaseModel):
 
 
 LoanWithSchedule.model_rebuild()
+
+
+class HealthScoreDimension(BaseModel):
+    key: str
+    name: str
+    score: float
+    weight: float
+    max_score: float
+    description: str
+    suggestions: List[str]
+
+
+class FinancialHealthScore(BaseModel):
+    ledger_id: int
+    total_score: float
+    level: str
+    level_description: str
+    level_color: str
+    dimensions: List[HealthScoreDimension]
+    overall_suggestions: List[str]
+    months_analyzed: int

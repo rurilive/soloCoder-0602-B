@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, DatePicker, Statistic, Spin, Select, Space, Tag } from 'antd';
-import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { Card, Row, Col, DatePicker, Statistic, Spin, Select, Space, Tag, Button, message } from 'antd';
+import { ArrowUpOutlined, ArrowDownOutlined, DownloadOutlined } from '@ant-design/icons';
 import { Column, Pie } from '@ant-design/charts';
 import dayjs from 'dayjs';
-import { statisticsApi, transactionApi, accountApi, CURRENCY_OPTIONS, formatCurrency } from '../services/api';
+import { statisticsApi, transactionApi, accountApi, CURRENCY_OPTIONS, formatCurrency, exportApi } from '../services/api';
 
 export default function MonthlyReport({ currentLedger }) {
   const [loading, setLoading] = useState(true);
@@ -69,6 +69,22 @@ export default function MonthlyReport({ currentLedger }) {
     fetchData();
   }, [currentLedger, month, displayCurrency]);
 
+  const handleExport = async () => {
+    if (!currentLedger) return;
+    try {
+      message.loading({ content: '正在导出...', key: 'export' });
+      await exportApi.monthlyReport({
+        ledger_id: currentLedger.id,
+        year: month.year(),
+        month: month.month() + 1,
+        target_currency: displayCurrency,
+      });
+      message.success({ content: '导出成功', key: 'export' });
+    } catch (e) {
+      message.error({ content: '导出失败: ' + e.message, key: 'export' });
+    }
+  };
+
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 100 }} />;
 
   const columnConfig = {
@@ -116,6 +132,7 @@ export default function MonthlyReport({ currentLedger }) {
             <Tag color="blue">已从{baseCurrency}折算</Tag>
           )}
         </Space>
+        <Button icon={<DownloadOutlined />} onClick={handleExport}>导出CSV</Button>
       </div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
