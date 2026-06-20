@@ -702,3 +702,40 @@ class FinancialHealthScore(BaseModel):
     dimensions: List[HealthScoreDimension]
     overall_suggestions: List[str]
     months_analyzed: int
+
+
+class MonthlyCashFlowPoint(BaseModel):
+    year: int
+    month: int
+    label: str
+    income: float
+    expense: float
+    net_cash_flow: float
+    is_actual: bool
+    income_lower: Optional[float] = None
+    income_upper: Optional[float] = None
+    expense_lower: Optional[float] = None
+    expense_upper: Optional[float] = None
+    net_lower: Optional[float] = None
+    net_upper: Optional[float] = None
+    confidence_level: Optional[float] = None
+
+
+class CashFlowPredictionWarning(BaseModel):
+    has_warning: bool
+    consecutive_negative_months: int
+    first_negative_month: Optional[str] = None
+    last_negative_month: Optional[str] = None
+    suggestions: List[str]
+
+
+class CashFlowPredictionResponse(BaseModel):
+    ledger_id: int
+    base_currency: str
+    historical_months: int
+    predicted_months: int
+    historical_data: List[MonthlyCashFlowPoint]
+    predicted_data: List[MonthlyCashFlowPoint]
+    combined_data: List[MonthlyCashFlowPoint]
+    warning: CashFlowPredictionWarning
+    model_description: str

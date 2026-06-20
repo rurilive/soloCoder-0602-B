@@ -11,7 +11,7 @@ from typing import Optional, List
 
 from app.database import engine, SessionLocal, Base, get_db
 from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
 
@@ -84,6 +84,73 @@ def seed_db():
     db.add_all(sample_transfers)
     db.commit()
 
+    historical_txs_personal = []
+    for month_offset in range(1, 7):
+        y, m = 2026, 6 - month_offset
+        if m <= 0:
+            y, m = 2025, 12 + m
+        month_str = f"{y:04d}-{m:02d}"
+        historical_txs_personal.extend([
+            Transaction(amount=15000, type="income", description=f"{m}月工资", category_id=1, ledger_id=personal.id, account_id=bank_card.id, date=f"{month_str}-01"),
+            Transaction(amount=1800 if month_offset <= 3 else 2200, type="income", description="自由职业收入", category_id=2, ledger_id=personal.id, account_id=alipay.id, date=f"{month_str}-05"),
+            Transaction(amount=850 + month_offset * 30, type="expense", description="日常餐饮", category_id=4, ledger_id=personal.id, account_id=alipay.id, date=f"{month_str}-02"),
+            Transaction(amount=200, type="expense", description="地铁公交", category_id=5, ledger_id=personal.id, account_id=cash.id, date=f"{month_str}-03"),
+            Transaction(amount=1200 + month_offset * 100, type="expense", description="购物消费", category_id=6, ledger_id=personal.id, account_id=alipay.id, date=f"{month_str}-06"),
+            Transaction(amount=300 + month_offset * 50, type="expense", description="娱乐消费", category_id=7, ledger_id=personal.id, account_id=alipay.id, date=f"{month_str}-08"),
+            Transaction(amount=3000, type="expense", description="房租", category_id=8, ledger_id=personal.id, account_id=bank_card.id, date=f"{month_str}-01"),
+        ])
+    db.add_all(historical_txs_personal)
+
+    historical_txs_family = []
+    for month_offset in range(1, 7):
+        y, m = 2026, 6 - month_offset
+        if m <= 0:
+            y, m = 2025, 12 + m
+        month_str = f"{y:04d}-{m:02d}"
+        historical_txs_family.extend([
+            Transaction(amount=25000, type="income", description=f"{m}月家庭工资", category_id=9, ledger_id=family.id, account_id=family_bank.id, date=f"{month_str}-01"),
+            Transaction(amount=4000 + month_offset * 200, type="income", description="理财收益", category_id=10, ledger_id=family.id, account_id=family_bank.id, date=f"{month_str}-10"),
+            Transaction(amount=2000 + month_offset * 100, type="expense", description="家庭餐饮", category_id=11, ledger_id=family.id, account_id=family_cash.id, date=f"{month_str}-02"),
+            Transaction(amount=3000, type="expense", description="孩子补习", category_id=12, ledger_id=family.id, account_id=family_bank.id, date=f"{month_str}-05"),
+            Transaction(amount=500, type="expense", description="医疗保健", category_id=13, ledger_id=family.id, account_id=family_bank.id, date=f"{month_str}-07"),
+        ])
+    db.add_all(historical_txs_family)
+    db.commit()
+
+    sample_loan = Loan(
+        name="车贷", principal=100000, annual_rate=4.5, term_months=36,
+        amortization_type="equal_payment", start_date="2026-01-01",
+        repayment_day=15, ledger_id=personal.id, account_id=bank_card.id,
+        category_id=8, status="active", total_interest=7094.25,
+        total_payment=107094.25, description="36期车贷",
+    )
+    db.add(sample_loan)
+    db.flush()
+
+    loan_schedule = []
+    monthly_rate = 4.5 / 100 / 12
+    monthly_payment = (100000 * monthly_rate) / (1 - (1 + monthly_rate) ** (-36))
+    remaining_principal = 100000
+    for period in range(1, 37):
+        interest = remaining_principal * monthly_rate
+        principal = monthly_payment - interest
+        remaining_principal -= principal
+        y, m = 2026, period
+        if m > 12:
+            y, m = 2026 + (m - 1) // 12, ((m - 1) % 12) + 1
+        due_date = f"{y:04d}-{m:02d}-15"
+        status = "paid" if period <= 5 else "pending"
+        loan_schedule.append(LoanRepaymentSchedule(
+            loan_id=sample_loan.id, period_number=period, due_date=due_date,
+            payment_amount=round(monthly_payment, 2),
+            principal_amount=round(principal, 2),
+            interest_amount=round(interest, 2),
+            remaining_principal=round(max(0, remaining_principal), 2),
+            status=status,
+        ))
+    db.add_all(loan_schedule)
+    db.commit()
+
     sample_rules = [
         RecurringRule(
             name="每月房租", frequency="monthly", amount=3000, type="expense",
@@ -131,6 +198,7 @@ app.include_router(transfers.router)
 app.include_router(exchange_rates.router)
 app.include_router(reconciliation.router)
 app.include_router(loans.router)
+app.include_router(prediction.router)
 
 
 @app.get("/api/health")
