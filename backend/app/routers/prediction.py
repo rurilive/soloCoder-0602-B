@@ -361,8 +361,8 @@ def predict_cash_flow(
     warning = CashFlowPredictionWarning(
         has_warning=has_warning,
         consecutive_negative_months=max_consecutive,
-        first_negative_month=max_first,
-        last_negative_month=max_last,
+        first_negative_month=max_first if max_consecutive >= 3 else None,
+        last_negative_month=max_last if max_consecutive >= 3 else None,
         suggestions=suggestions,
     )
 
