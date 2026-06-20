@@ -1,13 +1,11 @@
 import csv
 import io
-import calendar
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, date
 from fastapi import FastAPI, Depends, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
@@ -155,16 +153,18 @@ def _month_range(year: int, month: int):
     return start, end
 
 
-def _build_csv_response(headers: List[str], rows: List[List], filename_prefix: str, ascii_prefix: str = "export"):
+def _build_csv_response(rows: List[List], filename_prefix: str, ascii_prefix: str = "export", headers: Optional[List[str]] = None, extra_date_part: Optional[str] = None):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(headers)
+    if headers:
+        writer.writerow(headers)
     for row in rows:
         writer.writerow(row)
     buffer.seek(0)
     today = datetime.now().strftime("%Y%m%d")
-    filename = f"{filename_prefix}_{today}.csv"
-    ascii_filename = f"{ascii_prefix}_{today}.csv"
+    date_part = f"{extra_date_part}_{today}" if extra_date_part else today
+    filename = f"{filename_prefix}_{date_part}.csv"
+    ascii_filename = f"{ascii_prefix}_{date_part}.csv"
     encoded_filename = urllib.parse.quote(filename)
     return StreamingResponse(
         iter([buffer.getvalue()]),
@@ -217,7 +217,7 @@ def export_transactions(
             f"{tx.amount:.2f}",
             tx.description,
         ])
-    return _build_csv_response(headers, rows, "交易记录", ascii_prefix="transactions")
+    return _build_csv_response(rows, "交易记录", ascii_prefix="transactions", headers=headers)
 
 
 @app.get("/api/export/monthly-report")
@@ -281,35 +281,33 @@ def export_monthly_report(
             daily_totals[day_key]["expense"] += amount
             total_expense += amount
 
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-
-    writer.writerow([f"月度报表 - {year}年{month}月"])
-    writer.writerow([])
-    writer.writerow(["汇总信息"])
+    rows = []
     cur = target_currency or base_currency
-    writer.writerow(["总收入", f"{total_income:.2f}", cur])
-    writer.writerow(["总支出", f"{total_expense:.2f}", cur])
-    writer.writerow(["净结余", f"{total_income - total_expense:.2f}", cur])
-    writer.writerow(["交易笔数", len(tx_rows)])
-    writer.writerow([])
+    rows.append([f"月度报表 - {year}年{month}月"])
+    rows.append([])
+    rows.append(["汇总信息"])
+    rows.append(["总收入", f"{total_income:.2f}", cur])
+    rows.append(["总支出", f"{total_expense:.2f}", cur])
+    rows.append(["净结余", f"{total_income - total_expense:.2f}", cur])
+    rows.append(["交易笔数", len(tx_rows)])
+    rows.append([])
 
-    writer.writerow(["分类明细"])
-    writer.writerow(["类型", "分类", "币种", "金额", "占比"])
+    rows.append(["分类明细"])
+    rows.append(["类型", "分类", "币种", "金额", "占比"])
     total_all = total_income + total_expense
     sorted_cats = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
     for (tx_type, cat_name, currency), amount in sorted_cats:
         type_label = "收入" if tx_type == "income" else "支出"
         pct = f"{amount / total_all * 100:.2f}%" if total_all > 0 else "0.00%"
-        writer.writerow([type_label, cat_name, currency, f"{amount:.2f}", pct])
-    writer.writerow([])
+        rows.append([type_label, cat_name, currency, f"{amount:.2f}", pct])
+    rows.append([])
 
-    writer.writerow(["每日明细"])
-    writer.writerow(["日期", "币种", "收入", "支出", "净结余"])
+    rows.append(["每日明细"])
+    rows.append(["日期", "币种", "收入", "支出", "净结余"])
     for day_key in sorted(daily_totals.keys()):
         d, _ = day_key
         info = daily_totals[day_key]
-        writer.writerow([
+        rows.append([
             d,
             info["currency"],
             f"{info['income']:.2f}",
@@ -317,18 +315,7 @@ def export_monthly_report(
             f"{info['income'] - info['expense']:.2f}",
         ])
 
-    buffer.seek(0)
-    today = datetime.now().strftime("%Y%m%d")
-    filename = f"月度报表_{year}{month:02d}_{today}.csv"
-    ascii_filename = f"monthly-report_{year}{month:02d}_{today}.csv"
-    encoded_filename = urllib.parse.quote(filename)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="text/csv; charset=utf-8-sig",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename={ascii_filename}"
-        },
-    )
+    return _build_csv_response(rows, "月度报表", ascii_prefix="monthly-report", extra_date_part=f"{year}{month:02d}")
 
 
 @app.get("/api/export/loan-schedule")
@@ -372,7 +359,7 @@ def export_loan_schedule(
             s.transaction_id if s.transaction_id else "-",
         ])
 
-    return _build_csv_response(headers, rows, f"贷款还款计划_{loan.name}", ascii_prefix="loan-schedule")
+    return _build_csv_response(rows, f"贷款还款计划_{loan.name}", ascii_prefix="loan-schedule", headers=headers)
 
 
 def _get_level_info(score: float):
