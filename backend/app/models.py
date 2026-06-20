@@ -200,6 +200,8 @@ class InvestmentTransaction(Base):
     dividend_amount = Column(Float, nullable=True)
     reinvest = Column(Boolean, default=False)
     realized_gain = Column(Float, default=0.0)
+    raw_short_gain = Column(Float, default=0.0)
+    raw_long_gain = Column(Float, default=0.0)
     taxable_gain_short = Column(Float, default=0.0)
     taxable_gain_long = Column(Float, default=0.0)
     tax_amount_capital = Column(Float, default=0.0)

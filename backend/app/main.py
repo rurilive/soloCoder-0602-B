@@ -252,6 +252,9 @@ def seed_db():
             dividend_amount=kwargs.get("dividend_amount"),
             reinvest=kwargs.get("reinvest", False),
             description=kwargs.get("description", ""),
+            realized_gain=0.0,
+            raw_short_gain=0.0,
+            raw_long_gain=0.0,
             taxable_gain_short=0.0,
             taxable_gain_long=0.0,
             tax_amount_capital=0.0,
@@ -329,6 +332,8 @@ def seed_db():
             remaining -= sell
         proceeds = tx.amount - tx.fee
         tx.realized_gain = round(proceeds - total_cost, 2)
+        tx.raw_short_gain = round(short_gain, 2)
+        tx.raw_long_gain = round(long_gain, 2)
         net_short = short_gain
         net_long = long_gain
         taxable_short = max(0.0, net_short)
@@ -359,6 +364,9 @@ def seed_db():
                 date=tx.date, ledger_id=ledger_id, account_id=tx.account_id,
                 linked_transaction_id=tx.id,
                 description=f"分红再投资(税后净额) - {tx.description}",
+                realized_gain=0.0,
+                raw_short_gain=0.0,
+                raw_long_gain=0.0,
                 taxable_gain_short=0.0, taxable_gain_long=0.0,
                 tax_amount_capital=0.0, dividend_tax=0.0,
             )
@@ -420,6 +428,33 @@ def seed_db():
     process_buy(tsla_buy1, tsla.id, personal.id)
     tsla_sell = create_inv_tx(tsla.id, "sell", 10, 190.00, 0.60, "2026-04-20", personal.id, usd_inv.id, description="止损部分仓位")
     process_sell_fifo(tsla_sell, tsla.id, personal.id)
+
+    taxtest_sec = InvestmentSecurity(
+        symbol="TAXTEST", name="税务测试股票", type="stock",
+        currency="CNY", current_price=25.00, ledger_id=personal.id,
+    )
+    db.add(taxtest_sec)
+    db.commit()
+    db.refresh(taxtest_sec)
+
+    tax_buy = create_inv_tx(taxtest_sec.id, "buy", 100, 10.00, 0.50, "2024-01-01", personal.id, inv_account.id, description="税务测试原始买入")
+    process_buy(tax_buy, taxtest_sec.id, personal.id)
+    tax_split = create_inv_tx(taxtest_sec.id, "split", 0, 0, 0, "2025-06-01", personal.id, inv_account.id, split_ratio=2.0, description="1:2拆股验证持有期追溯")
+    db.add(tax_split)
+    db.flush()
+    tax_split_lots = db.query(InvestmentLot).filter(
+        InvestmentLot.security_id == taxtest_sec.id,
+        InvestmentLot.ledger_id == personal.id,
+        InvestmentLot.is_closed == False,
+    ).all()
+    for lot in tax_split_lots:
+        total_cost = lot.quantity_remaining * lot.cost_basis_per_share
+        lot.original_quantity = lot.original_quantity * 2.0
+        lot.quantity_remaining = lot.quantity_remaining * 2.0
+        lot.cost_basis_per_share = total_cost / lot.quantity_remaining if lot.quantity_remaining > 0 else 0
+    db.flush()
+    tax_sell = create_inv_tx(taxtest_sec.id, "sell", 100, 19.99, 1.00, "2026-06-21", personal.id, inv_account.id, description="拆股后卖出验证长期归类")
+    process_sell_fifo(tax_sell, taxtest_sec.id, personal.id)
 
     fam_etf1 = create_inv_tx(family_510300.id, "buy", 20000, 3.90, 8.00, "2025-12-01", family.id, family_inv.id, description="家庭配置沪深300")
     process_buy(fam_etf1, family_510300.id, family.id)

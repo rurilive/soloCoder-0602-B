@@ -169,6 +169,9 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - total_cost_sold
 
+    tx.raw_short_gain = _round2(short_gain)
+    tx.raw_long_gain = _round2(long_gain)
+
     net_short = short_gain
     net_long = long_gain
     taxable_short = max(0.0, net_short)
@@ -286,6 +289,9 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
     proceeds = tx.amount - tx.fee
     realized_gain = proceeds - cost_sold
 
+    tx.raw_short_gain = _round2(short_gain)
+    tx.raw_long_gain = _round2(long_gain)
+
     net_short = short_gain
     net_long = long_gain
     taxable_short = max(0.0, net_short)
@@ -342,8 +348,8 @@ def _process_dividend(db: Session, tx: InvestmentTransaction, security_id: int, 
     tx.amount = _round2(tx.dividend_amount)
 
     if tx.reinvest:
-        if tx.price <= 0 or tx.quantity <= 0:
-            raise HTTPException(status_code=400, detail="分红再投资需要提供价格和数量")
+        if tx.price <= 0:
+            raise HTTPException(status_code=400, detail="分红再投资需要提供价格")
         reinvest_amount = div_after_tax
         actual_qty = reinvest_amount / tx.price if tx.price > 0 else 0
 
@@ -475,6 +481,8 @@ def create_transaction(data: InvestmentTransactionCreate, db: Session = Depends(
 
     tx_data["amount"] = amount
     tx_data["realized_gain"] = 0.0
+    tx_data["raw_short_gain"] = 0.0
+    tx_data["raw_long_gain"] = 0.0
     tx_data["taxable_gain_short"] = 0.0
     tx_data["taxable_gain_long"] = 0.0
     tx_data["tax_amount_capital"] = 0.0
@@ -791,9 +799,19 @@ def get_tax_summary(
         .all()
     )
 
-    short_gain_total = sum(tx.taxable_gain_short for tx in sell_txs)
+    raw_short_total = sum(tx.raw_short_gain for tx in sell_txs)
+    raw_long_total = sum(tx.raw_long_gain for tx in sell_txs)
+
+    net_short = raw_short_total
+    net_long = raw_long_total
+    short_gain_total = max(0.0, net_short)
+    long_gain_total = max(0.0, net_long)
+    if net_short < 0:
+        long_gain_total = max(0.0, net_long + net_short)
+    if net_long < 0 and net_short > 0:
+        short_gain_total = max(0.0, net_short + net_long)
+
     short_tax = short_gain_total * SHORT_TERM_RATE
-    long_gain_total = sum(tx.taxable_gain_long for tx in sell_txs)
     long_tax = long_gain_total * LONG_TERM_RATE
 
     short_cost_total = 0.0
@@ -849,8 +867,18 @@ def get_tax_summary(
         m_sell_txs = [tx for tx in sell_txs if m_start <= tx.date < m_end]
         m_div_txs = [tx for tx in div_txs if m_start <= tx.date < m_end]
 
-        m_short = sum(tx.taxable_gain_short for tx in m_sell_txs)
-        m_long = sum(tx.taxable_gain_long for tx in m_sell_txs)
+        m_raw_short = sum(tx.raw_short_gain for tx in m_sell_txs)
+        m_raw_long = sum(tx.raw_long_gain for tx in m_sell_txs)
+
+        m_net_short = m_raw_short
+        m_net_long = m_raw_long
+        m_short = max(0.0, m_net_short)
+        m_long = max(0.0, m_net_long)
+        if m_net_short < 0:
+            m_long = max(0.0, m_net_long + m_net_short)
+        if m_net_long < 0 and m_net_short > 0:
+            m_short = max(0.0, m_net_short + m_net_long)
+
         m_div_income = sum(tx.dividend_amount or 0.0 for tx in m_div_txs)
         m_div_tax = sum(tx.dividend_tax for tx in m_div_txs)
         m_cap_tax = _round2(m_short * SHORT_TERM_RATE + m_long * LONG_TERM_RATE)

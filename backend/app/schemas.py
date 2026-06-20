@@ -825,6 +825,8 @@ class InvestmentTransactionOut(BaseModel):
     dividend_amount: Optional[float] = None
     reinvest: bool
     realized_gain: float
+    raw_short_gain: float = 0.0
+    raw_long_gain: float = 0.0
     taxable_gain_short: float = 0.0
     taxable_gain_long: float = 0.0
     tax_amount_capital: float = 0.0
