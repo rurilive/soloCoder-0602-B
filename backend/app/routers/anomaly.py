@@ -94,6 +94,7 @@ def _detect_time_anomaly(transactions):
     if len(transactions) < 4:
         return {}
     sorted_txs = sorted(transactions, key=lambda t: t.date)
+    tx_index = {t.id: i for i, t in enumerate(sorted_txs)}
 
     dow_counts = defaultdict(int)
     for t in sorted_txs:
@@ -127,6 +128,7 @@ def _detect_time_anomaly(transactions):
 
     short_interval_threshold = None
     long_interval_threshold = None
+    sorted_intervals = None
     if len(intervals) >= 4:
         sorted_intervals = sorted(intervals)
         n = len(sorted_intervals)
@@ -139,24 +141,6 @@ def _detect_time_anomaly(transactions):
             short_interval_threshold = max(0, q1 - 1.5 * iqr)
             long_interval_threshold = q3 + 1.5 * iqr
 
-    day_counts = defaultdict(int)
-    for t in sorted_txs:
-        day_counts[t.date] += 1
-    count_values = sorted(day_counts.values())
-    unusual_days = set()
-    if len(count_values) >= 4:
-        n = len(count_values)
-        q1_idx = n // 4
-        q3_idx = (3 * n) // 4
-        q1 = count_values[q1_idx]
-        q3 = count_values[q3_idx]
-        iqr = q3 - q1
-        if iqr > 0:
-            upper = q3 + 1.5 * iqr
-            for d, c in day_counts.items():
-                if c > upper:
-                    unusual_days.add(d)
-
     scores = {}
     for t in sorted_txs:
         score = 0.0
@@ -168,33 +152,20 @@ def _detect_time_anomaly(transactions):
         except (ValueError, TypeError):
             pass
 
-        if t.date in unusual_days:
-            c = day_counts[t.date]
-            if len(count_values) >= 4:
-                n = len(count_values)
-                q3_idx = (3 * n) // 4
-                q3 = count_values[q3_idx]
-                q1_idx = n // 4
-                q1 = count_values[q1_idx]
-                iqr = max(q3 - q1, 1)
-                dev = (c - q3) / iqr
-                score += min(dev * 2.0, 5.0)
-            else:
-                score += 2.0
-
         if short_interval_threshold is not None or long_interval_threshold is not None:
-            idx = next((i for i, s in enumerate(sorted_txs) if s.id == t.id), None)
+            idx = tx_index.get(t.id)
             if idx is not None:
+                n_int = len(sorted_intervals)
+                q1_int = sorted_intervals[n_int // 4]
+                q3_int = sorted_intervals[(3 * n_int) // 4]
+                iqr_int = max(q3_int - q1_int, 1)
                 if idx > 0 and short_interval_threshold is not None:
                     try:
                         prev = date.fromisoformat(sorted_txs[idx - 1].date)
                         curr = date.fromisoformat(t.date)
                         gap = (curr - prev).days
                         if 0 < gap < short_interval_threshold:
-                            n_int = len(sorted_intervals)
-                            q1_int = sorted_intervals[n_int // 4]
-                            iqr_int = sorted_intervals[(3 * n_int) // 4] - q1_int
-                            dev = (short_interval_threshold - gap) / max(iqr_int, 1)
+                            dev = (short_interval_threshold - gap) / iqr_int
                             score += min(dev * 2.0, 5.0)
                     except (ValueError, TypeError):
                         pass
@@ -204,10 +175,7 @@ def _detect_time_anomaly(transactions):
                         nxt = date.fromisoformat(sorted_txs[idx + 1].date)
                         gap = (nxt - curr).days
                         if gap > long_interval_threshold:
-                            n_int = len(sorted_intervals)
-                            q3_int = sorted_intervals[(3 * n_int) // 4]
-                            iqr_int = q3_int - sorted_intervals[n_int // 4]
-                            dev = (gap - long_interval_threshold) / max(iqr_int, 1)
+                            dev = (gap - long_interval_threshold) / iqr_int
                             score += min(dev * 2.0, 5.0)
                     except (ValueError, TypeError):
                         pass
