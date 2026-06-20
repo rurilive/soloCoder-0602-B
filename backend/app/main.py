@@ -153,7 +153,7 @@ def _month_range(year: int, month: int):
     return start, end
 
 
-def _build_csv_response(rows: List[List], filename_prefix: str, ascii_prefix: str = "export", headers: Optional[List[str]] = None, extra_date_part: Optional[str] = None):
+def _build_csv_response(headers: Optional[List[str]], rows: List[List], filename_prefix: str, ascii_prefix: str = "export", extra_date_part: Optional[str] = None):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     if headers:
@@ -217,7 +217,7 @@ def export_transactions(
             f"{tx.amount:.2f}",
             tx.description,
         ])
-    return _build_csv_response(rows, "交易记录", ascii_prefix="transactions", headers=headers)
+    return _build_csv_response(headers, rows, "交易记录", ascii_prefix="transactions")
 
 
 @app.get("/api/export/monthly-report")
@@ -315,7 +315,7 @@ def export_monthly_report(
             f"{info['income'] - info['expense']:.2f}",
         ])
 
-    return _build_csv_response(rows, "月度报表", ascii_prefix="monthly-report", extra_date_part=f"{year}{month:02d}")
+    return _build_csv_response(None, rows, "月度报表", ascii_prefix="monthly-report", extra_date_part=f"{year}{month:02d}")
 
 
 @app.get("/api/export/loan-schedule")
@@ -359,7 +359,7 @@ def export_loan_schedule(
             s.transaction_id if s.transaction_id else "-",
         ])
 
-    return _build_csv_response(rows, f"贷款还款计划_{loan.name}", ascii_prefix="loan-schedule", headers=headers)
+    return _build_csv_response(headers, rows, f"贷款还款计划_{loan.name}", ascii_prefix="loan-schedule")
 
 
 def _get_level_info(score: float):
