@@ -320,13 +320,11 @@ def predict_cash_flow(
     has_warning = False
     consecutive_negative = 0
     max_consecutive = 0
-    first_negative = None
-    last_negative = None
-    temp_first = None
     max_first = None
     max_last = None
+    temp_first = None
 
-    for i, point in enumerate(predicted_data):
+    for point in predicted_data:
         if point.net_cash_flow < 0:
             consecutive_negative += 1
             if temp_first is None:
@@ -335,7 +333,6 @@ def predict_cash_flow(
                 max_consecutive = consecutive_negative
                 max_first = temp_first
                 max_last = point.label
-            last_negative = point.label
         else:
             consecutive_negative = 0
             temp_first = None
@@ -343,8 +340,6 @@ def predict_cash_flow(
     suggestions: List[str] = []
     if max_consecutive >= 3:
         has_warning = True
-        first_negative = max_first
-        last_negative = max_last
         suggestions = [
             "预测显示未来将连续多个月出现负现金流，建议立即采取行动。",
             "审查非必要支出，寻找削减开支的机会（如娱乐、购物等）。",
@@ -366,8 +361,8 @@ def predict_cash_flow(
     warning = CashFlowPredictionWarning(
         has_warning=has_warning,
         consecutive_negative_months=max_consecutive,
-        first_negative_month=first_negative,
-        last_negative_month=last_negative,
+        first_negative_month=max_first,
+        last_negative_month=max_last,
         suggestions=suggestions,
     )
 
