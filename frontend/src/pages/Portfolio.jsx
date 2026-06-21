@@ -810,6 +810,9 @@ export default function Portfolio({ currentLedger }) {
                           />
                           <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
                             成本 {formatCurrency(taxSummary.short_cost_total, baseCur)} / 收入 {formatCurrency(taxSummary.short_proceeds_total, baseCur)}
+                            {taxSummary.raw_short_gain_total !== taxSummary.short_gain_total && (
+                              <><br />原始收益 <span style={{ color: '#faad14' }}>{formatCurrency(taxSummary.raw_short_gain_total, baseCur)}</span> (已抵扣亏损)</>
+                            )}
                           </div>
                         </Card>
                       </Col>
@@ -825,6 +828,9 @@ export default function Portfolio({ currentLedger }) {
                           />
                           <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
                             成本 {formatCurrency(taxSummary.long_cost_total, baseCur)} / 收入 {formatCurrency(taxSummary.long_proceeds_total, baseCur)}
+                            {taxSummary.raw_long_gain_total !== taxSummary.long_gain_total && (
+                              <><br />原始收益 <span style={{ color: '#faad14' }}>{formatCurrency(taxSummary.raw_long_gain_total, baseCur)}</span> (已抵扣亏损)</>
+                            )}
                           </div>
                         </Card>
                       </Col>
@@ -853,6 +859,9 @@ export default function Portfolio({ currentLedger }) {
                           />
                           <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
                             资本利得税 {formatCurrency(taxSummary.total_capital_tax, baseCur)} / 分红税 {formatCurrency(taxSummary.dividend_tax_total, baseCur)}
+                            {taxSummary.raw_total_tax !== taxSummary.total_tax && (
+                              <><br />原始税额 <span style={{ color: '#faad14' }}>{formatCurrency(taxSummary.raw_total_tax, baseCur)}</span> (亏损抵扣节省 {formatCurrency(taxSummary.raw_total_tax - taxSummary.total_tax, baseCur)})</>
+                            )}
                             <Divider type="vertical" />
                             有效税率 <span style={{ fontWeight: 600, color: '#1890ff' }}>{taxSummary.effective_tax_rate}%</span>
                           </div>

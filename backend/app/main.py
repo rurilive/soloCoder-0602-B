@@ -336,9 +336,7 @@ def seed_db():
         tx.raw_long_gain = round(long_gain, 2)
         tx.taxable_gain_short = round(short_gain, 2)
         tx.taxable_gain_long = round(long_gain, 2)
-        tx.tax_amount_capital = round(
-            max(0.0, short_gain) * SHORT_TERM_RATE_SEED + max(0.0, long_gain) * LONG_TERM_RATE_SEED, 2
-        )
+        tx.tax_amount_capital = 0.0
         db.flush()
 
     def process_dividend(tx, sec_id, ledger_id):

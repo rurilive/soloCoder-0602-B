@@ -963,6 +963,8 @@ class MonthlyTaxCalendarItem(BaseModel):
 class TaxSummaryResponse(BaseModel):
     ledger_id: int
     year: int
+    raw_short_gain_total: float
+    raw_long_gain_total: float
     short_gain_total: float
     short_cost_total: float
     short_proceeds_total: float
@@ -973,6 +975,8 @@ class TaxSummaryResponse(BaseModel):
     long_tax: float
     dividend_income_total: float
     dividend_tax_total: float
+    raw_capital_tax_total: float
+    raw_total_tax: float
     total_capital_tax: float
     total_tax: float
     effective_tax_rate: float

@@ -175,9 +175,7 @@ def _sell_fifo(db: Session, tx: InvestmentTransaction, security_id: int, ledger_
     tx.taxable_gain_long = _round2(long_gain)
 
     tx.realized_gain = _round2(realized_gain)
-    tx.tax_amount_capital = _round2(
-        max(0.0, short_gain) * SHORT_TERM_RATE + max(0.0, long_gain) * LONG_TERM_RATE
-    )
+    tx.tax_amount_capital = 0.0
     db.flush()
 
 
@@ -285,9 +283,7 @@ def _sell_weighted_avg(db: Session, tx: InvestmentTransaction, security_id: int,
     tx.taxable_gain_long = _round2(long_gain)
 
     tx.realized_gain = _round2(realized_gain)
-    tx.tax_amount_capital = _round2(
-        max(0.0, short_gain) * SHORT_TERM_RATE + max(0.0, long_gain) * LONG_TERM_RATE
-    )
+    tx.tax_amount_capital = 0.0
     db.flush()
 
 
@@ -836,6 +832,7 @@ def get_tax_summary(
     net_income = short_gain_total + long_gain_total + dividend_income_total
     effective_tax_rate = _round2((total_tax / net_income * 100) if net_income > 0 else 0.0)
 
+    raw_capital_tax_total = 0.0
     monthly_calendar = []
     for m in range(1, 13):
         m_start = f"{year}-{m:02d}-01"
@@ -853,6 +850,9 @@ def get_tax_summary(
         m_div_income = sum(tx.dividend_amount or 0.0 for tx in m_div_txs)
         m_div_tax = sum(tx.dividend_tax for tx in m_div_txs)
         m_cap_tax = _round2(max(0.0, m_short) * SHORT_TERM_RATE + max(0.0, m_long) * LONG_TERM_RATE)
+        m_total_tax = _round2(m_cap_tax + m_div_tax)
+
+        raw_capital_tax_total += m_cap_tax
 
         monthly_calendar.append(MonthlyTaxCalendarItem(
             year=year,
@@ -862,12 +862,17 @@ def get_tax_summary(
             dividend_income=_round2(m_div_income),
             dividend_tax=_round2(m_div_tax),
             capital_tax=m_cap_tax,
-            total_tax=_round2(m_cap_tax + m_div_tax),
+            total_tax=m_total_tax,
         ))
+
+    raw_capital_tax_total = _round2(raw_capital_tax_total)
+    raw_total_tax = _round2(raw_capital_tax_total + dividend_tax_total)
 
     return TaxSummaryResponse(
         ledger_id=ledger_id,
         year=year,
+        raw_short_gain_total=_round2(raw_short_total),
+        raw_long_gain_total=_round2(raw_long_total),
         short_gain_total=_round2(short_gain_total),
         short_cost_total=_round2(short_cost_total),
         short_proceeds_total=_round2(short_proceeds_total),
@@ -878,6 +883,8 @@ def get_tax_summary(
         long_tax=_round2(long_tax),
         dividend_income_total=_round2(dividend_income_total),
         dividend_tax_total=_round2(dividend_tax_total),
+        raw_capital_tax_total=raw_capital_tax_total,
+        raw_total_tax=raw_total_tax,
         total_capital_tax=total_capital_tax,
         total_tax=total_tax,
         effective_tax_rate=effective_tax_rate,
