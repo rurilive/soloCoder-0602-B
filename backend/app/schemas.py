@@ -987,3 +987,75 @@ class TaxDetailsResponse(BaseModel):
     ledger_id: int
     year: int
     details: List[TaxDetailItem]
+
+
+class AnnualCategoryStat(BaseModel):
+    category_id: int
+    category_name: str
+    category_icon: str
+    type: str
+    amount: float
+    percentage: float
+
+
+class AnnualMonthlyCashFlow(BaseModel):
+    month: int
+    label: str
+    income: float
+    expense: float
+    net_cash_flow: float
+
+
+class AnnualInvestmentSummary(BaseModel):
+    total_realized_gain: float
+    total_unrealized_gain: float
+    total_dividends: float
+    total_market_value: float
+    total_cost_basis: float
+    total_return_pct: float
+
+
+class AnnualBudgetItem(BaseModel):
+    category_id: int
+    category_name: str
+    category_icon: str
+    budget_amount: float
+    spent_amount: float
+    remaining: float
+    execution_rate: float
+    is_overbudget: bool
+
+
+class AnnualBudgetSummary(BaseModel):
+    total_budget: float
+    total_spent: float
+    total_remaining: float
+    overall_execution_rate: float
+    overbudget_count: int
+    items: List[AnnualBudgetItem]
+
+
+class AnnualHealthScorePoint(BaseModel):
+    month: int
+    score: float
+    level: str
+    level_color: str
+
+
+class AnnualReportResponse(BaseModel):
+    ledger_id: int
+    year: int
+    base_currency: str
+    total_income: float
+    total_expense: float
+    net_balance: float
+    savings_rate: float
+    transaction_count: int
+    income_categories: List[AnnualCategoryStat]
+    expense_categories: List[AnnualCategoryStat]
+    monthly_cash_flow: List[AnnualMonthlyCashFlow]
+    investment_summary: AnnualInvestmentSummary
+    tax_summary: Optional[TaxSummaryResponse] = None
+    budget_summary: AnnualBudgetSummary
+    health_score_history: List[AnnualHealthScorePoint]
+    latest_health_score: Optional[FinancialHealthScore] = None

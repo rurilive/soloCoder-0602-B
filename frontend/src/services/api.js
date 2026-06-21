@@ -71,6 +71,10 @@ export const statisticsApi = {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
     return request(`/statistics/categories?${qs}`);
   },
+  annual: (params) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/statistics/annual?${qs}`);
+  },
 };
 
 export const budgetApi = {
@@ -215,7 +219,8 @@ function parseContentDispositionFilename(disposition) {
   if (starMatch && starMatch[1]) {
     try {
       return decodeURIComponent(starMatch[1].replace(/["']/g, ''));
-    } catch (e) {
+    } catch {
+      // ignore decode errors
     }
   }
   const plainMatch = disposition.match(/; filename=([^;]+)/i) || disposition.match(/filename=([^;]+)$/i);

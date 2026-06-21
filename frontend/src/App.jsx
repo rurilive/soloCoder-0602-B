@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Layout, Menu, Select, Typography, ConfigProvider, theme } from 'antd';
-import { DashboardOutlined, UnorderedListOutlined, TagsOutlined, BarChartOutlined, BookOutlined, ScheduleOutlined, WalletOutlined, AccountBookOutlined, BankOutlined, FundOutlined, StockOutlined } from '@ant-design/icons';
+import { DashboardOutlined, UnorderedListOutlined, TagsOutlined, BarChartOutlined, BookOutlined, ScheduleOutlined, WalletOutlined, AccountBookOutlined, BankOutlined, FundOutlined, StockOutlined, FileTextOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Categories from './pages/Categories';
 import MonthlyReport from './pages/MonthlyReport';
+import AnnualReport from './pages/AnnualReport';
 import Ledgers from './pages/Ledgers';
 import Recurring from './pages/Recurring';
 import BudgetManagement from './pages/BudgetManagement';
@@ -27,6 +28,7 @@ const menuItems = [
   { key: 'accounts', icon: <AccountBookOutlined />, label: '账户管理' },
   { key: 'categories', icon: <TagsOutlined />, label: '分类管理' },
   { key: 'report', icon: <BarChartOutlined />, label: '月度报表' },
+  { key: 'annual-report', icon: <FileTextOutlined />, label: '年度报告' },
   { key: 'recurring', icon: <ScheduleOutlined />, label: '周期记账' },
   { key: 'budget', icon: <WalletOutlined />, label: '预算管理' },
   { key: 'ledgers', icon: <BookOutlined />, label: '账本管理' },
@@ -75,6 +77,7 @@ function App() {
       case 'accounts': return <Accounts currentLedger={currentLedger} />;
       case 'categories': return <Categories currentLedger={currentLedger} />;
       case 'report': return <MonthlyReport currentLedger={currentLedger} />;
+      case 'annual-report': return <AnnualReport currentLedger={currentLedger} />;
       case 'recurring': return <Recurring currentLedger={currentLedger} />;
       case 'budget': return <BudgetManagement currentLedger={currentLedger} />;
       case 'ledgers': return <Ledgers currentLedger={currentLedger} onSwitch={(l) => { handleSwitchLedger(l); refreshLedgers(); }} />;
