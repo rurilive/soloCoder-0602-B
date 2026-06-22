@@ -62,6 +62,18 @@ export const transactionApi = {
   delete: (id) => request(`/transactions/${id}`, { method: 'DELETE' }),
 };
 
+export const tagApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return request(`/tags/${qs ? '?' + qs : ''}`);
+  },
+  get: (id) => request(`/tags/${id}`),
+  create: (data) => request('/tags/', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => request(`/tags/${id}`, { method: 'DELETE' }),
+  getTransactionCount: (id) => request(`/tags/${id}/transactions/count`),
+};
+
 export const statisticsApi = {
   monthly: (params) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();

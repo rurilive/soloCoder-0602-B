@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 
 from app.database import engine, SessionLocal, Base, get_db
-from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot, TaxLotSale
-from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly, portfolio
+from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot, TaxLotSale, Tag
+from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly, portfolio, tags
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
 
@@ -60,6 +60,33 @@ def seed_db():
     db.add_all(cats_personal + cats_family)
     db.commit()
 
+    tags_personal = [
+        Tag(name="必需", color="#52c41a", ledger_id=personal.id),
+        Tag(name="可选", color="#faad14", ledger_id=personal.id),
+        Tag(name="投资", color="#1890ff", ledger_id=personal.id),
+        Tag(name="人情", color="#eb2f96", ledger_id=personal.id),
+        Tag(name="健康", color="#722ed1", ledger_id=personal.id),
+        Tag(name="工作", color="#13c2c2", ledger_id=personal.id),
+    ]
+    tags_family = [
+        Tag(name="必需", color="#52c41a", ledger_id=family.id),
+        Tag(name="可选", color="#faad14", ledger_id=family.id),
+        Tag(name="教育", color="#1890ff", ledger_id=family.id),
+        Tag(name="医疗", color="#f5222d", ledger_id=family.id),
+        Tag(name="储蓄", color="#13c2c2", ledger_id=family.id),
+    ]
+    db.add_all(tags_personal + tags_family)
+    db.commit()
+
+    tag_map_personal = {t.name: t for t in tags_personal}
+    tag_map_family = {t.name: t for t in tags_family}
+
+    def _attach_tags(tx, names, ledger_id):
+        mapping = tag_map_personal if ledger_id == personal.id else tag_map_family
+        for n in names:
+            if n in mapping:
+                tx.tags.append(mapping[n])
+
     sample_txs = [
         Transaction(amount=15000, type="income", description="6月工资", category_id=1, ledger_id=personal.id, account_id=bank_card.id, date="2026-06-01"),
         Transaction(amount=2000, type="income", description="自由职业收入", category_id=2, ledger_id=personal.id, account_id=alipay.id, date="2026-06-05"),
@@ -75,6 +102,14 @@ def seed_db():
         Transaction(amount=3000, type="expense", description="孩子补习", category_id=12, ledger_id=family.id, account_id=family_bank.id, date="2026-06-05"),
         Transaction(amount=500, type="expense", description="体检", category_id=13, ledger_id=family.id, account_id=family_bank.id, date="2026-06-07"),
     ]
+    sample_tag_names = [
+        ["工作"], ["工作"], ["必需"], ["必需"], ["可选"],
+        ["可选", "人情"], ["必需"], ["可选"], ["工作"],
+        ["投资", "储蓄"], ["必需"], ["教育", "必需"], ["医疗", "健康"],
+    ]
+    for tx, names in zip(sample_txs, sample_tag_names):
+        _attach_tags(tx, names, tx.ledger_id)
+
     db.add_all(sample_txs)
     db.commit()
 
@@ -466,6 +501,7 @@ app.include_router(loans.router)
 app.include_router(prediction.router)
 app.include_router(anomaly.router)
 app.include_router(portfolio.router)
+app.include_router(tags.router)
 
 
 @app.get("/api/health")

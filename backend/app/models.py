@@ -1,8 +1,30 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, UniqueConstraint, Table
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+
+transaction_tags = Table(
+    "transaction_tags",
+    Base.metadata,
+    Column("transaction_id", Integer, ForeignKey("transactions.id"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id"), primary_key=True),
+)
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), nullable=False)
+    color = Column(String(20), default="#1890ff")
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("ledger_id", "name", name="uq_tag_ledger_name"),
+    )
 
 
 class Ledger(Base):
@@ -54,6 +76,8 @@ class Transaction(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     date = Column(String(10), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+    tags = relationship("Tag", secondary=transaction_tags, lazy="joined")
 
 
 class Transfer(Base):

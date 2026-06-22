@@ -3,6 +3,35 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict
 
 
+class TagCreate(BaseModel):
+    name: str
+    color: str = "#1890ff"
+    ledger_id: int
+
+
+class TagUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class TagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    color: str
+    ledger_id: int
+    created_at: datetime
+
+
+class TagStat(BaseModel):
+    tag_id: int
+    tag_name: str
+    tag_color: str
+    type: str
+    amount: float
+    percentage: float
+
+
 class LedgerCreate(BaseModel):
     name: str
     type: str = "personal"
@@ -150,6 +179,7 @@ class TransactionCreate(BaseModel):
     ledger_id: int
     account_id: int
     date: str
+    tag_ids: List[int] = []
 
 
 class TransactionUpdate(BaseModel):
@@ -159,6 +189,7 @@ class TransactionUpdate(BaseModel):
     category_id: Optional[int] = None
     account_id: Optional[int] = None
     date: Optional[str] = None
+    tag_ids: Optional[List[int]] = None
 
 
 class TransactionOut(BaseModel):
@@ -172,6 +203,7 @@ class TransactionOut(BaseModel):
     account_id: int
     date: str
     created_at: datetime
+    tags: List[TagOut] = []
 
 
 class MonthlySummary(BaseModel):
@@ -1053,6 +1085,8 @@ class AnnualReportResponse(BaseModel):
     transaction_count: int
     income_categories: List[AnnualCategoryStat]
     expense_categories: List[AnnualCategoryStat]
+    income_tags: List[TagStat]
+    expense_tags: List[TagStat]
     monthly_cash_flow: List[AnnualMonthlyCashFlow]
     investment_summary: AnnualInvestmentSummary
     tax_summary: Optional[TaxSummaryResponse] = None

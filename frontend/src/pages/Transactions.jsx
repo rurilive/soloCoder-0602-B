@@ -1,49 +1,67 @@
 import { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Tag, Space, Popconfirm, message } from 'antd';
-import { PlusOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Tag as AntTag, Space, Popconfirm, message } from 'antd';
+import { PlusOutlined, DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { transactionApi, categoryApi, accountApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency, exportApi } from '../services/api';
+import { transactionApi, categoryApi, accountApi, tagApi, CURRENCY_SYMBOLS, CURRENCY_OPTIONS, formatCurrency, exportApi } from '../services/api';
+
+const TAG_COLORS = ['#52c41a', '#1890ff', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#2f54eb', '#a0d911'];
 
 export default function Transactions({ currentLedger }) {
   const [data, setData] = useState([]);
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [form] = Form.useForm();
+  const [tagForm] = Form.useForm();
   const [filterMonth, setFilterMonth] = useState(dayjs());
   const [filterType, setFilterType] = useState();
   const [filterCategoryId, setFilterCategoryId] = useState();
+  const [filterTagIds, setFilterTagIds] = useState([]);
 
   const fetchData = async () => {
     if (!currentLedger) return;
     setLoading(true);
     try {
-      const [txs, cats, accs] = await Promise.all([
-        transactionApi.list({
-          ledger_id: currentLedger.id,
-          year: filterMonth.year(),
-          month: filterMonth.month() + 1,
-          type: filterType,
-          category_id: filterCategoryId,
-        }),
+      const params = {
+        ledger_id: currentLedger.id,
+        year: filterMonth.year(),
+        month: filterMonth.month() + 1,
+        type: filterType,
+        category_id: filterCategoryId,
+      };
+      if (filterTagIds && filterTagIds.length > 0) {
+        params.tag_ids = filterTagIds.join(',');
+      }
+      const [txs, cats, accs, tagList] = await Promise.all([
+        transactionApi.list(params),
         categoryApi.list({ ledger_id: currentLedger.id }),
         accountApi.list({ ledger_id: currentLedger.id }),
+        tagApi.list({ ledger_id: currentLedger.id }),
       ]);
       setData(txs);
       setCategories(cats);
       setAccounts(accs);
+      setTags(tagList);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchData(); }, [currentLedger, filterMonth, filterType, filterCategoryId]);
+  useEffect(() => { fetchData(); }, [currentLedger, filterMonth, filterType, filterCategoryId, filterTagIds]);
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
-    const payload = { ...values, date: values.date.format('YYYY-MM-DD'), ledger_id: currentLedger.id };
+    const selectedTagIds = values.tag_ids || [];
+    const payload = {
+      ...values,
+      date: values.date.format('YYYY-MM-DD'),
+      ledger_id: currentLedger.id,
+      tag_ids: selectedTagIds,
+    };
     if (editItem) {
       await transactionApi.update(editItem.id, payload);
       message.success('更新成功');
@@ -67,13 +85,17 @@ export default function Transactions({ currentLedger }) {
     if (!currentLedger) return;
     try {
       message.loading({ content: '正在导出...', key: 'export' });
-      await exportApi.transactions({
+      const params = {
         ledger_id: currentLedger.id,
         year: filterMonth.year(),
         month: filterMonth.month() + 1,
         type: filterType,
         category_id: filterCategoryId,
-      });
+      };
+      if (filterTagIds && filterTagIds.length > 0) {
+        params.tag_ids = filterTagIds.join(',');
+      }
+      await exportApi.transactions(params);
       message.success({ content: '导出成功', key: 'export' });
     } catch (e) {
       message.error({ content: '导出失败: ' + e.message, key: 'export' });
@@ -86,6 +108,7 @@ export default function Transactions({ currentLedger }) {
       ...record,
       date: dayjs(record.date),
       account_id: record.account_id ?? defaultAccount?.id,
+      tag_ids: (record.tags || []).map((t) => t.id),
     });
     setModalOpen(true);
   };
@@ -93,8 +116,21 @@ export default function Transactions({ currentLedger }) {
   const openCreate = () => {
     setEditItem(null);
     form.resetFields();
-    form.setFieldsValue({ type: 'expense', date: dayjs(), account_id: defaultAccount?.id });
+    form.setFieldsValue({ type: 'expense', date: dayjs(), account_id: defaultAccount?.id, tag_ids: [] });
     setModalOpen(true);
+  };
+
+  const handleCreateTag = async () => {
+    const values = await tagForm.validateFields();
+    try {
+      await tagApi.create({ ...values, ledger_id: currentLedger.id });
+      message.success('标签创建成功');
+      setTagModalOpen(false);
+      tagForm.resetFields();
+      fetchData();
+    } catch (e) {
+      message.error('创建失败: ' + e.message);
+    }
   };
 
   const catMap = {};
@@ -103,6 +139,8 @@ export default function Transactions({ currentLedger }) {
   accounts.forEach((a) => { accountMap[a.id] = a; });
   const accountCurrencyMap = {};
   accounts.forEach((a) => { accountCurrencyMap[a.id] = a.currency; });
+  const tagMap = {};
+  tags.forEach((t) => { tagMap[t.id] = t; });
 
   const defaultAccount = accounts.find((a) => a.is_default) || accounts[0];
 
@@ -115,7 +153,7 @@ export default function Transactions({ currentLedger }) {
     { title: '日期', dataIndex: 'date', key: 'date', width: 110 },
     {
       title: '类型', dataIndex: 'type', key: 'type', width: 80,
-      render: (t) => <Tag color={t === 'income' ? 'green' : 'red'}>{t === 'income' ? '收入' : '支出'}</Tag>,
+      render: (t) => <AntTag color={t === 'income' ? 'green' : 'red'}>{t === 'income' ? '收入' : '支出'}</AntTag>,
     },
     { title: '分类', dataIndex: 'category_id', key: 'category_id', width: 100, render: (id) => catMap[id] || id },
     {
@@ -123,7 +161,20 @@ export default function Transactions({ currentLedger }) {
       render: (id) => {
         const acc = accountMap[id];
         if (!acc) return id;
-        return <span>{acc.name} <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{acc.currency}</Tag></span>;
+        return <span>{acc.name} <AntTag style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{acc.currency}</AntTag></span>;
+      },
+    },
+    {
+      title: '标签', dataIndex: 'tags', key: 'tags', width: 200,
+      render: (tagList) => {
+        if (!tagList || tagList.length === 0) return <span style={{ color: '#999' }}>-</span>;
+        return (
+          <Space wrap size={4}>
+            {tagList.map((t) => (
+              <AntTag key={t.id} color={t.color} style={{ margin: 0 }}>{t.name}</AntTag>
+            ))}
+          </Space>
+        );
       },
     },
     { title: '描述', dataIndex: 'description', key: 'description' },
@@ -187,14 +238,49 @@ export default function Transactions({ currentLedger }) {
               <Select.Option key={c.id} value={c.id} label={c.name}>{c.name}</Select.Option>
             ))}
           </Select>
+          <Select
+            mode="multiple"
+            placeholder="筛选标签(任一匹配)"
+            style={{ minWidth: 200, maxWidth: 360 }}
+            allowClear
+            value={filterTagIds}
+            onChange={setFilterTagIds}
+            maxTagCount="responsive"
+            tagRender={(props) => {
+              const { label, value, closable, onClose } = props;
+              const tag = tags.find((t) => t.id === value);
+              return (
+                <AntTag
+                  color={tag?.color}
+                  closable={closable}
+                  onClose={onClose}
+                  style={{ marginInlineEnd: 4 }}
+                >
+                  {label}
+                </AntTag>
+              );
+            }}
+          >
+            {tags.map((t) => (
+              <Select.Option key={t.id} value={t.id} label={t.name}>
+                <Space>
+                  <AntTag color={t.color}>{t.name}</AntTag>
+                </Space>
+              </Select.Option>
+            ))}
+          </Select>
         </Space>
         <Space>
+          <Button icon={<TagsOutlined />} onClick={() => { tagForm.resetFields(); setTagModalOpen(true); }}>
+            新建标签
+          </Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出CSV</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加记录</Button>
         </Space>
       </div>
       <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ pageSize: 15 }} />
-      <Modal title={editItem ? '编辑记录' : '添加记录'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditItem(null); }} destroyOnClose>
+
+      <Modal title={editItem ? '编辑记录' : '添加记录'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditItem(null); }} destroyOnClose width={520}>
         <Form form={form} layout="vertical">
           <Form.Item name="type" label="类型" rules={[{ required: true }]}>
             <Select>
@@ -224,8 +310,82 @@ export default function Transactions({ currentLedger }) {
           <Form.Item name="date" label="日期" rules={[{ required: true }]}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
+          <Form.Item name="tag_ids" label="标签">
+            <Select
+              mode="multiple"
+              placeholder="选择标签，可多选"
+              allowClear
+              maxTagCount="responsive"
+              dropdownRender={(menu) => (
+                <>
+                  {menu}
+                  <div
+                    style={{ padding: '8px 12px', borderTop: '1px solid #f0f0f0', cursor: 'pointer', color: '#1890ff' }}
+                    onClick={() => { setModalOpen(false); tagForm.resetFields(); setTagModalOpen(true); }}
+                  >
+                    <PlusOutlined /> 新建标签
+                  </div>
+                </>
+              )}
+              tagRender={(props) => {
+                const { label, value, closable, onClose } = props;
+                const tag = tags.find((t) => t.id === value);
+                return (
+                  <AntTag
+                    color={tag?.color}
+                    closable={closable}
+                    onClose={onClose}
+                    style={{ marginInlineEnd: 4 }}
+                  >
+                    {label}
+                  </AntTag>
+                );
+              }}
+            >
+              {tags.map((t) => (
+                <Select.Option key={t.id} value={t.id} label={t.name}>
+                  <Space>
+                    <AntTag color={t.color}>{t.name}</AntTag>
+                  </Space>
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
           <Form.Item name="description" label="描述">
             <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="新建标签"
+        open={tagModalOpen}
+        onOk={handleCreateTag}
+        onCancel={() => { setTagModalOpen(false); tagForm.resetFields(); }}
+        destroyOnClose
+      >
+        <Form form={tagForm} layout="vertical">
+          <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
+            <Input placeholder="如：必需、可选、投资等" maxLength={20} />
+          </Form.Item>
+          <Form.Item name="color" label="标签颜色" rules={[{ required: true }]} initialValue={TAG_COLORS[0]}>
+            <Select>
+              {TAG_COLORS.map((c) => (
+                <Select.Option key={c} value={c}>
+                  <Space>
+                    <span style={{
+                      display: 'inline-block',
+                      width: 16,
+                      height: 16,
+                      borderRadius: 4,
+                      background: c,
+                      verticalAlign: 'middle',
+                    }} />
+                    <span>{c}</span>
+                  </Space>
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

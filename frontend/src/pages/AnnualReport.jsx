@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Card, Row, Col, Statistic, Spin, Space, Button, message, Progress,
-  Table, Tag, Typography, Divider, Select,
+  Table, Tag as AntTag, Typography, Divider, Select, Tabs,
 } from 'antd';
 import {
   ArrowUpOutlined, ArrowDownOutlined, DownloadOutlined,
-  DollarOutlined, FundOutlined, FileTextOutlined,
+  DollarOutlined, FundOutlined, FileTextOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { Pie, Line } from '@ant-design/charts';
 import html2canvas from 'html2canvas';
@@ -19,6 +19,7 @@ export default function AnnualReport({ currentLedger }) {
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(dayjs().year());
   const [data, setData] = useState(null);
+  const [expenseDim, setExpenseDim] = useState('category');
   const reportRef = useRef(null);
 
   const baseCurrency = currentLedger?.base_currency || 'CNY';
@@ -91,29 +92,22 @@ export default function AnnualReport({ currentLedger }) {
     type: '收入',
     name: c.category_name,
     value: c.amount,
+    color: '#52c41a',
   }));
 
-  const expensePieData = data.expense_categories.map((c) => ({
+  const expenseCategoryPieData = data.expense_categories.map((c) => ({
     type: '支出',
     name: c.category_name,
     value: c.amount,
+    icon: c.category_icon,
   }));
 
-  const combinedPieData = [...incomePieData, ...expensePieData];
-
-  const pieConfig = {
-    data: combinedPieData,
-    angleField: 'value',
-    colorField: 'name',
-    seriesField: 'type',
-    radius: 0.9,
-    innerRadius: 0.6,
-    legend: { position: 'right' },
-    label: {
-      text: (d) => `${d.name}: ${formatCurrency(d.value, data.base_currency)}`,
-      style: { fontSize: 11 },
-    },
-  };
+  const expenseTagPieData = data.expense_tags.map((t) => ({
+    type: '支出',
+    name: t.tag_name,
+    value: t.amount,
+    color: t.tag_color,
+  }));
 
   const cashFlowData = [];
   data.monthly_cash_flow.forEach((m) => {
@@ -211,7 +205,7 @@ export default function AnnualReport({ currentLedger }) {
       title: '执行率',
       key: 'execution',
       render: (_, record) => {
-        if (record.budget_amount <= 0) return <Tag>未设预算</Tag>;
+        if (record.budget_amount <= 0) return <AntTag>未设预算</AntTag>;
         const pct = Math.min(record.execution_rate, 150);
         const color = record.is_overbudget ? '#cf1322' : pct > 80 ? '#faad14' : '#3f8600';
         return (
@@ -226,6 +220,163 @@ export default function AnnualReport({ currentLedger }) {
     },
   ];
 
+  const expenseCategoryColumns = [
+    {
+      title: '分类',
+      dataIndex: 'category_name',
+      key: 'category_name',
+      render: (text, record) => (
+        <Space>
+          <span>{record.category_icon}</span>
+          <span>{text}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '支出金额',
+      dataIndex: 'amount',
+      key: 'amount',
+      align: 'right',
+      render: (v) => formatCurrency(v, data.base_currency),
+    },
+    {
+      title: '占比',
+      dataIndex: 'percentage',
+      key: 'percentage',
+      width: 200,
+      render: (pct, record) => (
+        <Progress
+          percent={pct}
+          size="small"
+          strokeColor="#f5222d"
+          format={(val) => `${val.toFixed(1)}%`}
+        />
+      ),
+    },
+  ];
+
+  const expenseTagColumns = [
+    {
+      title: '标签',
+      dataIndex: 'tag_name',
+      key: 'tag_name',
+      render: (text, record) => (
+        <AntTag color={record.tag_color}>{text}</AntTag>
+      ),
+    },
+    {
+      title: '支出金额',
+      dataIndex: 'amount',
+      key: 'amount',
+      align: 'right',
+      render: (v) => formatCurrency(v, data.base_currency),
+    },
+    {
+      title: '占比',
+      dataIndex: 'percentage',
+      key: 'percentage',
+      width: 200,
+      render: (pct, record) => (
+        <Progress
+          percent={pct}
+          size="small"
+          strokeColor={record.tag_color}
+          format={(val) => `${val.toFixed(1)}%`}
+        />
+      ),
+    },
+  ];
+
+  const categoryPieConfig = {
+    data: expenseCategoryPieData,
+    angleField: 'value',
+    colorField: 'name',
+    radius: 0.9,
+    innerRadius: 0.6,
+    legend: { position: 'right' },
+    label: {
+      text: (d) => `${d.name}: ${formatCurrency(d.value, data.base_currency)}`,
+      style: { fontSize: 11 },
+    },
+  };
+
+  const tagPieConfig = {
+    data: expenseTagPieData,
+    angleField: 'value',
+    colorField: 'color',
+    radius: 0.9,
+    innerRadius: 0.6,
+    legend: { position: 'right' },
+    color: expenseTagPieData.map((d) => d.color),
+    label: {
+      text: (d) => `${d.name}: ${formatCurrency(d.value, data.base_currency)}`,
+      style: { fontSize: 11 },
+    },
+  };
+
+  const expenseTabItems = [
+    {
+      key: 'category',
+      label: (
+        <Space>
+          <FileTextOutlined />
+          按分类
+        </Space>
+      ),
+      children: (
+        <Row gutter={16}>
+          <Col xs={24} lg={12}>
+            {expenseCategoryPieData.length > 0 ? (
+              <Pie {...categoryPieConfig} />
+            ) : (
+              <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>暂无数据</div>
+            )}
+          </Col>
+          <Col xs={24} lg={12}>
+            <Table
+              dataSource={data.expense_categories}
+              columns={expenseCategoryColumns}
+              rowKey="category_id"
+              pagination={false}
+              size="small"
+            />
+          </Col>
+        </Row>
+      ),
+    },
+    {
+      key: 'tag',
+      label: (
+        <Space>
+          <TagsOutlined />
+          按标签
+        </Space>
+      ),
+      children: (
+        <Row gutter={16}>
+          <Col xs={24} lg={12}>
+            {expenseTagPieData.length > 0 ? (
+              <Pie {...tagPieConfig} />
+            ) : (
+              <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+                暂无标签数据，可在交易记录中添加标签后查看
+              </div>
+            )}
+          </Col>
+          <Col xs={24} lg={12}>
+            <Table
+              dataSource={data.expense_tags}
+              columns={expenseTagColumns}
+              rowKey="tag_id"
+              pagination={false}
+              size="small"
+            />
+          </Col>
+        </Row>
+      ),
+    },
+  ];
+
   return (
     <div>
       <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -236,7 +387,7 @@ export default function AnnualReport({ currentLedger }) {
             style={{ width: 140 }}
             options={yearOptions}
           />
-          <Tag color="blue">币种: {baseCurrency}</Tag>
+          <AntTag color="blue">币种: {baseCurrency}</AntTag>
         </Space>
         <Button type="primary" icon={<DownloadOutlined />} onClick={handleExportPDF}>
           导出PDF
@@ -301,9 +452,20 @@ export default function AnnualReport({ currentLedger }) {
 
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col xs={24} lg={12}>
-            <Card title="收支分类对比">
-              {combinedPieData.length > 0 ? (
-                <Pie {...pieConfig} />
+            <Card title="收入分类分布">
+              {incomePieData.length > 0 ? (
+                <Pie
+                  data={incomePieData}
+                  angleField="value"
+                  colorField="name"
+                  radius={0.9}
+                  innerRadius={0.6}
+                  legend={{ position: 'right' }}
+                  label={{
+                    text: (d) => `${d.name}: ${formatCurrency(d.value, data.base_currency)}`,
+                    style: { fontSize: 11 },
+                  }}
+                />
               ) : (
                 <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无数据</div>
               )}
@@ -315,6 +477,29 @@ export default function AnnualReport({ currentLedger }) {
             </Card>
           </Col>
         </Row>
+
+        <Card
+          title={
+            <Space>
+              <span>支出分析</span>
+              <AntTag color="red">总支出: {formatCurrency(data.total_expense, data.base_currency)}</AntTag>
+            </Space>
+          }
+          style={{ marginBottom: 24 }}
+          extra={
+            <Select
+              value={expenseDim}
+              onChange={setExpenseDim}
+              style={{ width: 140 }}
+              options={[
+                { label: '按分类查看', value: 'category' },
+                { label: '按标签查看', value: 'tag' },
+              ]}
+            />
+          }
+        >
+          <Tabs activeKey={expenseDim} onChange={setExpenseDim} items={expenseTabItems} />
+        </Card>
 
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col xs={24} md={12}>
@@ -439,9 +624,9 @@ export default function AnnualReport({ currentLedger }) {
                     <Divider style={{ margin: '8px 0' }} />
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: '#666' }}>实际税率</span>
-                      <Tag color="red" style={{ fontSize: 14 }}>
+                      <AntTag color="red" style={{ fontSize: 14 }}>
                         {data.tax_summary.effective_tax_rate}%
-                      </Tag>
+                      </AntTag>
                     </div>
                   </Col>
                 </Row>
@@ -454,9 +639,9 @@ export default function AnnualReport({ currentLedger }) {
           title={
             <Space>
               <span>预算 vs 实际对比</span>
-              <Tag color={data.budget_summary.overall_execution_rate > 100 ? 'red' : 'blue'}>
+              <AntTag color={data.budget_summary.overall_execution_rate > 100 ? 'red' : 'blue'}>
                 整体执行率: {data.budget_summary.overall_execution_rate}%
-              </Tag>
+              </AntTag>
             </Space>
           }
           style={{ marginBottom: 24 }}
@@ -469,7 +654,7 @@ export default function AnnualReport({ currentLedger }) {
                 已支出: {formatCurrency(data.budget_summary.total_spent, data.base_currency)}
               </span>
               {data.budget_summary.overbudget_count > 0 && (
-                <Tag color="red">{data.budget_summary.overbudget_count}项超支</Tag>
+                <AntTag color="red">{data.budget_summary.overbudget_count}项超支</AntTag>
               )}
             </Space>
           }

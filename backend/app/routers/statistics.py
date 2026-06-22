@@ -8,10 +8,10 @@ from app.database import get_db
 from app.models import (
     Transaction, Category, Account, Ledger, Budget,
     InvestmentSecurity, InvestmentTransaction, InvestmentLot,
-    TaxLotSale, Loan, LoanRepaymentSchedule,
+    TaxLotSale, Loan, LoanRepaymentSchedule, Tag, transaction_tags,
 )
 from app.schemas import (
-    MonthlySummary, CategoryStat,
+    MonthlySummary, CategoryStat, TagStat,
     AnnualCategoryStat, AnnualMonthlyCashFlow, AnnualInvestmentSummary,
     AnnualBudgetItem, AnnualBudgetSummary, AnnualHealthScorePoint,
     AnnualReportResponse, FinancialHealthScore, HealthScoreDimension,
@@ -607,6 +607,69 @@ def annual_report(
     income_cats.sort(key=lambda x: x.amount, reverse=True)
     expense_cats.sort(key=lambda x: x.amount, reverse=True)
 
+    all_tags = db.query(Tag).filter(Tag.ledger_id == ledger_id).all()
+    tag_map = {t.id: t for t in all_tags}
+
+    tx_ids_for_tags = [
+        r for r in tx_rows
+    ]
+    tx_id_to_idx = {}
+    for idx, r in enumerate(tx_rows):
+        if hasattr(r, 'id'):
+            tx_id_to_idx[r.id] = idx
+
+    tx_tag_rows = (
+        db.query(
+            Transaction.id.label("tx_id"),
+            Transaction.type,
+            Transaction.amount,
+            Transaction.date,
+            Transaction.account_id,
+            transaction_tags.c.tag_id,
+        )
+        .join(
+            transaction_tags,
+            transaction_tags.c.transaction_id == Transaction.id,
+        )
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.date >= year_start,
+            Transaction.date < year_end,
+        )
+        .all()
+    )
+
+    tag_totals: Dict[Tuple[str, int], float] = {}
+    for r in tx_tag_rows:
+        converted = _convert(r.amount, r.account_id, r.date)
+        key = (r.type, r.tag_id)
+        tag_totals[key] = tag_totals.get(key, 0.0) + converted
+
+    income_tags: List[TagStat] = []
+    expense_tags: List[TagStat] = []
+
+    for (tx_type, tag_id), amount in tag_totals.items():
+        tag = tag_map.get(tag_id)
+        if not tag:
+            continue
+        total = total_income if tx_type == "income" else total_expense
+        pct = _r2(amount / total * 100) if total > 0 else 0.0
+        stat = TagStat(
+            tag_id=tag.id,
+            tag_name=tag.name,
+            tag_color=tag.color or "#1890ff",
+            type=tx_type,
+            amount=_r2(amount),
+            percentage=pct,
+        )
+        if tx_type == "income":
+            income_tags.append(stat)
+        else:
+            expense_tags.append(stat)
+
+    income_tags.sort(key=lambda x: x.amount, reverse=True)
+    expense_tags.sort(key=lambda x: x.amount, reverse=True)
+
     monthly_cash_flow: List[AnnualMonthlyCashFlow] = []
     month_labels = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
     for m in range(1, 13):
@@ -926,6 +989,8 @@ def annual_report(
         transaction_count=transaction_count,
         income_categories=income_cats,
         expense_categories=expense_cats,
+        income_tags=income_tags,
+        expense_tags=expense_tags,
         monthly_cash_flow=monthly_cash_flow,
         investment_summary=investment_summary,
         tax_summary=tax_summary,
