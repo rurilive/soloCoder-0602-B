@@ -14,6 +14,8 @@ export default function Transactions({ currentLedger }) {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [tagConfirmLoading, setTagConfirmLoading] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [form] = Form.useForm();
   const [tagForm] = Form.useForm();
@@ -56,6 +58,7 @@ export default function Transactions({ currentLedger }) {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+      setConfirmLoading(true);
       const selectedTagIds = values.tag_ids || [];
       const payload = {
         ...values,
@@ -77,6 +80,8 @@ export default function Transactions({ currentLedger }) {
     } catch (e) {
       if (e && e.errorFields) return;
       message.error('操作失败: ' + (e.message || '未知错误'));
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
@@ -132,6 +137,7 @@ export default function Transactions({ currentLedger }) {
   const handleCreateTag = async () => {
     try {
       const values = await tagForm.validateFields();
+      setTagConfirmLoading(true);
       const newTag = await tagApi.create({ ...values, ledger_id: currentLedger.id });
       message.success('标签创建成功');
       setTags((prevTags) => [...prevTags, newTag]);
@@ -142,6 +148,8 @@ export default function Transactions({ currentLedger }) {
     } catch (e) {
       if (e && e.errorFields) return;
       message.error('创建失败: ' + (e.message || '未知错误'));
+    } finally {
+      setTagConfirmLoading(false);
     }
   };
 
@@ -292,7 +300,7 @@ export default function Transactions({ currentLedger }) {
       </div>
       <Table columns={columns} dataSource={data} rowKey="id" loading={loading} pagination={{ pageSize: 15 }} />
 
-      <Modal title={editItem ? '编辑记录' : '添加记录'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditItem(null); }} destroyOnClose width={520}>
+      <Modal title={editItem ? '编辑记录' : '添加记录'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditItem(null); }} destroyOnClose width={520} confirmLoading={confirmLoading}>
         <Form form={form} layout="vertical">
           <Form.Item name="type" label="类型" rules={[{ required: true }]}>
             <Select>
@@ -377,6 +385,7 @@ export default function Transactions({ currentLedger }) {
         destroyOnClose
         centered
         width={400}
+        confirmLoading={tagConfirmLoading}
       >
         <Form form={tagForm} layout="vertical">
           <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
