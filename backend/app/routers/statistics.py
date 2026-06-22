@@ -302,49 +302,46 @@ def _compute_month_health_score(db: Session, ledger_id: int, year: int, month: i
     }
 
 
-def _build_full_health_score(db: Session, ledger_id: int, year: int, month: int, ledger: Ledger) -> Optional[FinancialHealthScore]:
+def _build_full_health_score(db: Session, ledger_id: int, year: int, month: int, ledger: Ledger, cached: Optional[dict] = None) -> Optional[FinancialHealthScore]:
     start, end = _month_range(year, month)
-    tx_rows = (
-        db.query(Transaction.type, Transaction.amount, Transaction.date, Transaction.account_id)
-        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
-        .all()
-    )
-    if not tx_rows:
-        return FinancialHealthScore(
-            ledger_id=ledger_id,
-            total_score=0,
-            level="很差",
-            level_description="当月暂无数据，无法评估财务健康状况",
-            level_color="#f5222d",
-            dimensions=[],
-            overall_suggestions=["建议先记录至少一个月的收支数据，以便进行财务健康评估。"],
-            months_analyzed=0,
+    if cached is None:
+        tx_rows = (
+            db.query(Transaction.type, Transaction.amount, Transaction.date, Transaction.account_id)
+            .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+            .all()
         )
-
-    base_currency = ledger.base_currency
-    account_ids = list(set(r.account_id for r in tx_rows))
-    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
-    account_currency_map = {a.id: a.currency for a in accounts}
-
-    income = 0.0
-    expense = 0.0
-    for r in tx_rows:
-        src_cur = account_currency_map.get(r.account_id, base_currency)
-        amount = float(r.amount or 0)
-        if src_cur != base_currency:
-            try:
-                converted, _, _, _ = convert_amount(db, amount, src_cur, base_currency, r.date)
-                amount = converted
-            except ValueError:
-                pass
-        if r.type == "income":
-            income += amount
-        else:
-            expense += amount
-
-    net = income - expense
-    savings_rate = net / income if income > 0 else 0.0
-    tx_count = len(tx_rows)
+        if not tx_rows:
+            return None
+        base_currency = ledger.base_currency
+        account_ids = list(set(r.account_id for r in tx_rows))
+        accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+        account_currency_map = {a.id: a.currency for a in accounts}
+        income = 0.0
+        expense = 0.0
+        for r in tx_rows:
+            src_cur = account_currency_map.get(r.account_id, base_currency)
+            amount = float(r.amount or 0)
+            if src_cur != base_currency:
+                try:
+                    converted, _, _, _ = convert_amount(db, amount, src_cur, base_currency, r.date)
+                    amount = converted
+                except ValueError:
+                    pass
+            if r.type == "income":
+                income += amount
+            else:
+                expense += amount
+        net = income - expense
+        savings_rate = net / income if income > 0 else 0.0
+        tx_count = len(tx_rows)
+    else:
+        income = cached["income"]
+        expense = cached["expense"]
+        net = cached["net"]
+        savings_rate = cached["savings_rate"]
+        tx_count = cached["tx_count"]
+        if tx_count == 0:
+            return None
 
     dimensions = []
 
@@ -892,9 +889,11 @@ def annual_report(
     )
 
     health_score_history: List[AnnualHealthScorePoint] = []
+    health_score_cache: Dict[int, dict] = {}
     for m in range(1, 13):
         result = _compute_month_health_score(db, ledger_id, year, m, ledger)
         if result:
+            health_score_cache[m] = result
             health_score_history.append(AnnualHealthScorePoint(
                 month=m,
                 score=result["score"],
@@ -912,7 +911,8 @@ def annual_report(
     latest_health_score = None
     for m in range(12, 0, -1):
         if health_score_history[m - 1].score > 0:
-            latest_health_score = _build_full_health_score(db, ledger_id, year, m, ledger)
+            cached = health_score_cache.get(m)
+            latest_health_score = _build_full_health_score(db, ledger_id, year, m, ledger, cached=cached)
             break
 
     return AnnualReportResponse(
