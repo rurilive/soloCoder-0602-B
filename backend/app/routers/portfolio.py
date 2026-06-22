@@ -237,6 +237,28 @@ def _update_regular_transaction_from_investment(
     return regular_tx
 
 
+def _rollback_sell_transaction(db: Session, inv_tx: InvestmentTransaction) -> None:
+    tls_list = (
+        db.query(TaxLotSale)
+        .filter(TaxLotSale.sell_transaction_id == inv_tx.id)
+        .all()
+    )
+
+    for tls in tls_list:
+        lot = (
+            db.query(InvestmentLot)
+            .filter(InvestmentLot.id == tls.lot_id)
+            .first()
+        )
+        if lot:
+            lot.quantity_remaining += tls.quantity_sold
+            if lot.quantity_remaining > 1e-9:
+                lot.is_closed = False
+
+    db.query(TaxLotSale).filter(TaxLotSale.sell_transaction_id == inv_tx.id).delete()
+    db.flush()
+
+
 def _delete_linked_regular_transaction(db: Session, inv_tx: InvestmentTransaction) -> None:
     if not inv_tx.linked_regular_transaction_id:
         return
@@ -269,28 +291,7 @@ def _delete_investment_transaction_complete(db: Session, inv_tx: InvestmentTrans
             db.delete(lot)
 
     elif inv_tx.type == "sell":
-        db.query(TaxLotSale).filter(TaxLotSale.sell_transaction_id == inv_tx.id).delete()
-
-        sell_lots = (
-            db.query(InvestmentLot)
-            .join(TaxLotSale, TaxLotSale.lot_id == InvestmentLot.id)
-            .filter(TaxLotSale.sell_transaction_id == inv_tx.id)
-            .all()
-        )
-        for lot in sell_lots:
-            tls = (
-                db.query(TaxLotSale)
-                .filter(
-                    TaxLotSale.sell_transaction_id == inv_tx.id,
-                    TaxLotSale.lot_id == lot.id,
-                )
-                .first()
-            )
-            if tls:
-                lot.quantity_remaining += tls.quantity_sold
-                if lot.quantity_remaining > 1e-9:
-                    lot.is_closed = False
-                db.flush()
+        _rollback_sell_transaction(db, inv_tx)
 
     elif inv_tx.type == "dividend" and inv_tx.reinvest:
         reinvest_tx = (
@@ -796,7 +797,7 @@ def update_transaction(
     if data.account_id is not None:
         _validate_account(db, data.account_id, tx.ledger_id)
 
-    if tx.type in {"buy", "sell"}:
+    if tx.type == "buy":
         existing_sells = (
             db.query(TaxLotSale)
             .join(InvestmentLot, TaxLotSale.lot_id == InvestmentLot.id)
@@ -806,8 +807,15 @@ def update_transaction(
         if existing_sells > 0:
             raise HTTPException(
                 status_code=400,
-                detail="该交易涉及的持仓已产生卖出记录，无法修改。请先删除相关的卖出交易。",
+                detail="该买入交易对应持仓已部分卖出，无法修改。请先删除相关的卖出交易。",
             )
+
+    needs_recalc_sell = tx.type == "sell" and (
+        "quantity" in data.model_dump(exclude_unset=True)
+        or "price" in data.model_dump(exclude_unset=True)
+        or "fee" in data.model_dump(exclude_unset=True)
+        or "date" in data.model_dump(exclude_unset=True)
+    )
 
     update_dict = data.model_dump(exclude_unset=True)
 
@@ -816,6 +824,9 @@ def update_transaction(
         new_price = update_dict.get("price", tx.price)
         if tx.type in {"buy", "sell"}:
             update_dict["amount"] = _round2(new_qty * new_price)
+
+    if tx.type == "sell" and needs_recalc_sell:
+        _rollback_sell_transaction(db, tx)
 
     for key, value in update_dict.items():
         setattr(tx, key, value)
@@ -838,6 +849,14 @@ def update_transaction(
             lot.cost_basis_per_share = cost_per_share
             lot.original_quantity = qty
             db.flush()
+
+    elif tx.type == "sell" and needs_recalc_sell:
+        if tx.quantity <= 0:
+            raise HTTPException(status_code=400, detail="卖出数量必须大于0")
+        if ledger.cost_method == "fifo":
+            _sell_fifo(db, tx, tx.security_id, tx.ledger_id)
+        else:
+            _sell_weighted_avg(db, tx, tx.security_id, tx.ledger_id)
 
     elif tx.type == "dividend":
         div_tax = _round2(tx.dividend_amount * DIVIDEND_TAX_RATE)
