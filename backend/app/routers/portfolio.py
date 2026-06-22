@@ -256,6 +256,14 @@ def _rollback_sell_transaction(db: Session, inv_tx: InvestmentTransaction) -> No
                 lot.is_closed = False
 
     db.query(TaxLotSale).filter(TaxLotSale.sell_transaction_id == inv_tx.id).delete()
+
+    inv_tx.realized_gain = 0.0
+    inv_tx.raw_short_gain = 0.0
+    inv_tx.raw_long_gain = 0.0
+    inv_tx.taxable_gain_short = 0.0
+    inv_tx.taxable_gain_long = 0.0
+    inv_tx.tax_amount_capital = 0.0
+
     db.flush()
 
 
@@ -825,9 +833,6 @@ def update_transaction(
         if tx.type in {"buy", "sell"}:
             update_dict["amount"] = _round2(new_qty * new_price)
 
-    if tx.type == "sell" and needs_recalc_sell:
-        _rollback_sell_transaction(db, tx)
-
     for key, value in update_dict.items():
         setattr(tx, key, value)
 
@@ -851,6 +856,7 @@ def update_transaction(
             db.flush()
 
     elif tx.type == "sell" and needs_recalc_sell:
+        _rollback_sell_transaction(db, tx)
         if tx.quantity <= 0:
             raise HTTPException(status_code=400, detail="卖出数量必须大于0")
         if ledger.cost_method == "fifo":
