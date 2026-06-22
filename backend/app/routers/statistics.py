@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional, Dict, Tuple, Set
-from datetime import datetime
 
 from app.database import get_db
 from app.models import (
@@ -609,14 +608,6 @@ def annual_report(
 
     all_tags = db.query(Tag).filter(Tag.ledger_id == ledger_id).all()
     tag_map = {t.id: t for t in all_tags}
-
-    tx_ids_for_tags = [
-        r for r in tx_rows
-    ]
-    tx_id_to_idx = {}
-    for idx, r in enumerate(tx_rows):
-        if hasattr(r, 'id'):
-            tx_id_to_idx[r.id] = idx
 
     tx_tag_rows = (
         db.query(

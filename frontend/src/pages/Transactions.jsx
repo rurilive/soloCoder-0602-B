@@ -123,11 +123,13 @@ export default function Transactions({ currentLedger }) {
   const handleCreateTag = async () => {
     const values = await tagForm.validateFields();
     try {
-      await tagApi.create({ ...values, ledger_id: currentLedger.id });
+      const newTag = await tagApi.create({ ...values, ledger_id: currentLedger.id });
       message.success('标签创建成功');
+      setTags([...tags, newTag]);
+      const currentTagIds = form.getFieldValue('tag_ids') || [];
+      form.setFieldsValue({ tag_ids: [...currentTagIds, newTag.id] });
       setTagModalOpen(false);
       tagForm.resetFields();
-      fetchData();
     } catch (e) {
       message.error('创建失败: ' + e.message);
     }
@@ -321,7 +323,7 @@ export default function Transactions({ currentLedger }) {
                   {menu}
                   <div
                     style={{ padding: '8px 12px', borderTop: '1px solid #f0f0f0', cursor: 'pointer', color: '#1890ff' }}
-                    onClick={() => { setModalOpen(false); tagForm.resetFields(); setTagModalOpen(true); }}
+                    onClick={() => { tagForm.resetFields(); setTagModalOpen(true); }}
                   >
                     <PlusOutlined /> 新建标签
                   </div>
@@ -363,6 +365,9 @@ export default function Transactions({ currentLedger }) {
         onOk={handleCreateTag}
         onCancel={() => { setTagModalOpen(false); tagForm.resetFields(); }}
         destroyOnClose
+        zIndex={2000}
+        centered
+        width={400}
       >
         <Form form={tagForm} layout="vertical">
           <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
