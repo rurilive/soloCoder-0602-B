@@ -54,31 +54,40 @@ export default function Transactions({ currentLedger }) {
   useEffect(() => { fetchData(); }, [currentLedger, filterMonth, filterType, filterCategoryId, filterTagIds]);
 
   const handleSubmit = async () => {
-    const values = await form.validateFields();
-    const selectedTagIds = values.tag_ids || [];
-    const payload = {
-      ...values,
-      date: values.date.format('YYYY-MM-DD'),
-      ledger_id: currentLedger.id,
-      tag_ids: selectedTagIds,
-    };
-    if (editItem) {
-      await transactionApi.update(editItem.id, payload);
-      message.success('更新成功');
-    } else {
-      await transactionApi.create(payload);
-      message.success('添加成功');
+    try {
+      const values = await form.validateFields();
+      const selectedTagIds = values.tag_ids || [];
+      const payload = {
+        ...values,
+        date: values.date.format('YYYY-MM-DD'),
+        ledger_id: currentLedger.id,
+        tag_ids: selectedTagIds,
+      };
+      if (editItem) {
+        await transactionApi.update(editItem.id, payload);
+        message.success('更新成功');
+      } else {
+        await transactionApi.create(payload);
+        message.success('添加成功');
+      }
+      setModalOpen(false);
+      setEditItem(null);
+      form.resetFields();
+      fetchData();
+    } catch (e) {
+      if (e && e.errorFields) return;
+      message.error('操作失败: ' + (e.message || '未知错误'));
     }
-    setModalOpen(false);
-    setEditItem(null);
-    form.resetFields();
-    fetchData();
   };
 
   const handleDelete = async (id) => {
-    await transactionApi.delete(id);
-    message.success('删除成功');
-    fetchData();
+    try {
+      await transactionApi.delete(id);
+      message.success('删除成功');
+      fetchData();
+    } catch (e) {
+      message.error('删除失败: ' + (e.message || '未知错误'));
+    }
   };
 
   const handleExport = async () => {
@@ -121,8 +130,8 @@ export default function Transactions({ currentLedger }) {
   };
 
   const handleCreateTag = async () => {
-    const values = await tagForm.validateFields();
     try {
+      const values = await tagForm.validateFields();
       const newTag = await tagApi.create({ ...values, ledger_id: currentLedger.id });
       message.success('标签创建成功');
       setTags((prevTags) => [...prevTags, newTag]);
@@ -131,7 +140,8 @@ export default function Transactions({ currentLedger }) {
       setTagModalOpen(false);
       tagForm.resetFields();
     } catch (e) {
-      message.error('创建失败: ' + e.message);
+      if (e && e.errorFields) return;
+      message.error('创建失败: ' + (e.message || '未知错误'));
     }
   };
 
