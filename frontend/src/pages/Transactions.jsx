@@ -125,7 +125,7 @@ export default function Transactions({ currentLedger }) {
     try {
       const newTag = await tagApi.create({ ...values, ledger_id: currentLedger.id });
       message.success('标签创建成功');
-      setTags([...tags, newTag]);
+      setTags((prevTags) => [...prevTags, newTag]);
       const currentTagIds = form.getFieldValue('tag_ids') || [];
       form.setFieldsValue({ tag_ids: [...currentTagIds, newTag.id] });
       setTagModalOpen(false);
@@ -365,7 +365,6 @@ export default function Transactions({ currentLedger }) {
         onOk={handleCreateTag}
         onCancel={() => { setTagModalOpen(false); tagForm.resetFields(); }}
         destroyOnClose
-        zIndex={2000}
         centered
         width={400}
       >
