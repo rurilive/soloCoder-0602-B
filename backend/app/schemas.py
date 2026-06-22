@@ -843,6 +843,19 @@ class InvestmentTransactionCreate(BaseModel):
     account_id: int
 
 
+class InvestmentTransactionUpdate(BaseModel):
+    security_id: Optional[int] = None
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    fee: Optional[float] = None
+    date: Optional[str] = None
+    split_ratio: Optional[float] = None
+    dividend_amount: Optional[float] = None
+    reinvest: Optional[bool] = None
+    description: Optional[str] = None
+    account_id: Optional[int] = None
+
+
 class InvestmentTransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -868,6 +881,7 @@ class InvestmentTransactionOut(BaseModel):
     ledger_id: int
     account_id: int
     linked_transaction_id: Optional[int] = None
+    linked_regular_transaction_id: Optional[int] = None
     created_at: datetime
 
 

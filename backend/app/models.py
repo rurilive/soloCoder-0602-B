@@ -235,6 +235,7 @@ class InvestmentTransaction(Base):
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     linked_transaction_id = Column(Integer, ForeignKey("investment_transactions.id"), nullable=True)
+    linked_regular_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
 

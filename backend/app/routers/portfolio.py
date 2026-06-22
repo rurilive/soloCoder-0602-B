@@ -8,16 +8,19 @@ from app.database import get_db
 from app.models import (
     Ledger,
     Account,
+    Category,
     InvestmentSecurity,
     InvestmentTransaction,
     InvestmentLot,
     TaxLotSale,
+    Transaction,
 )
 from app.schemas import (
     InvestmentSecurityCreate,
     InvestmentSecurityUpdate,
     InvestmentSecurityOut,
     InvestmentTransactionCreate,
+    InvestmentTransactionUpdate,
     InvestmentTransactionOut,
     PortfolioSummary,
     HoldingItem,
@@ -36,6 +39,274 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 VALID_TX_TYPES = {"buy", "sell", "dividend", "split"}
 VALID_SECURITY_TYPES = {"stock", "etf", "fund", "bond", "crypto", "other"}
+
+INVESTMENT_EXPENSE_CATEGORY = "投资支出"
+INVESTMENT_INCOME_CATEGORY = "投资收入"
+DIVIDEND_INCOME_CATEGORY = "股息分红"
+
+
+def _get_or_create_investment_category(db: Session, ledger_id: int, category_name: str, category_type: str) -> Category:
+    cat = (
+        db.query(Category)
+        .filter(
+            Category.ledger_id == ledger_id,
+            Category.name == category_name,
+            Category.type == category_type,
+        )
+        .first()
+    )
+    if not cat:
+        icon_map = {
+            INVESTMENT_EXPENSE_CATEGORY: "fund",
+            INVESTMENT_INCOME_CATEGORY: "rise",
+            DIVIDEND_INCOME_CATEGORY: "gift",
+        }
+        cat = Category(
+            name=category_name,
+            type=category_type,
+            icon=icon_map.get(category_name, "fund"),
+            ledger_id=ledger_id,
+        )
+        db.add(cat)
+        db.flush()
+    return cat
+
+
+def _sync_investment_to_regular_transaction(
+    db: Session,
+    inv_tx: InvestmentTransaction,
+    security: InvestmentSecurity,
+    ledger: Ledger,
+) -> Transaction:
+    if inv_tx.type == "split":
+        return None
+
+    if inv_tx.type == "buy":
+        total_amount = inv_tx.amount + inv_tx.fee
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, INVESTMENT_EXPENSE_CATEGORY, "expense")
+        tx_type = "expense"
+        amount = total_amount
+        description = f"[投资买入] {security.symbol} {security.name} - {inv_tx.quantity}股 × {inv_tx.price}"
+        if inv_tx.fee > 0:
+            description += f" (含手续费{inv_tx.fee})"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    elif inv_tx.type == "sell":
+        net_amount = inv_tx.amount - inv_tx.fee
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, INVESTMENT_INCOME_CATEGORY, "income")
+        tx_type = "income"
+        amount = net_amount
+        description = f"[投资卖出] {security.symbol} {security.name} - {inv_tx.quantity}股 × {inv_tx.price}"
+        if inv_tx.fee > 0:
+            description += f" (扣除手续费{inv_tx.fee})"
+        if inv_tx.realized_gain != 0:
+            gain_str = f"+{inv_tx.realized_gain:.2f}" if inv_tx.realized_gain > 0 else f"{inv_tx.realized_gain:.2f}"
+            description += f" [已实现收益{gain_str}]"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    elif inv_tx.type == "dividend":
+        if inv_tx.dividend_after_tax is not None:
+            amount = inv_tx.dividend_after_tax
+        else:
+            amount = inv_tx.dividend_amount or 0.0
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, DIVIDEND_INCOME_CATEGORY, "income")
+        tx_type = "income"
+        description = f"[股息分红] {security.symbol} {security.name} - 税前{inv_tx.dividend_amount or 0:.2f}"
+        if inv_tx.dividend_tax > 0:
+            description += f"，扣税{inv_tx.dividend_tax:.2f}，税后{amount:.2f}"
+        if inv_tx.reinvest:
+            description += " (分红再投资)"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    else:
+        return None
+
+    if security.currency != ledger.base_currency:
+        try:
+            converted_amount, rate, rate_date, source = convert_amount(
+                db, amount, security.currency, ledger.base_currency, inv_tx.date
+            )
+            tx_amount = converted_amount
+            description += f" [{security.currency} {amount:.2f} × 汇率{rate:.4f} = {ledger.base_currency} {converted_amount:.2f}]"
+        except ValueError:
+            tx_amount = amount
+            description += f" [币种{security.currency}，汇率获取失败，按原金额记录]"
+    else:
+        tx_amount = amount
+
+    regular_tx = Transaction(
+        amount=_round2(tx_amount),
+        type=tx_type,
+        description=description,
+        category_id=cat.id,
+        ledger_id=inv_tx.ledger_id,
+        account_id=inv_tx.account_id,
+        date=inv_tx.date,
+    )
+    db.add(regular_tx)
+    db.flush()
+
+    inv_tx.linked_regular_transaction_id = regular_tx.id
+    db.flush()
+
+    return regular_tx
+
+
+def _update_regular_transaction_from_investment(
+    db: Session,
+    inv_tx: InvestmentTransaction,
+    security: InvestmentSecurity,
+    ledger: Ledger,
+) -> Optional[Transaction]:
+    if inv_tx.type == "split":
+        return None
+
+    if not inv_tx.linked_regular_transaction_id:
+        return _sync_investment_to_regular_transaction(db, inv_tx, security, ledger)
+
+    regular_tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == inv_tx.linked_regular_transaction_id)
+        .first()
+    )
+    if not regular_tx:
+        return _sync_investment_to_regular_transaction(db, inv_tx, security, ledger)
+
+    if inv_tx.type == "buy":
+        total_amount = inv_tx.amount + inv_tx.fee
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, INVESTMENT_EXPENSE_CATEGORY, "expense")
+        tx_type = "expense"
+        amount = total_amount
+        description = f"[投资买入] {security.symbol} {security.name} - {inv_tx.quantity}股 × {inv_tx.price}"
+        if inv_tx.fee > 0:
+            description += f" (含手续费{inv_tx.fee})"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    elif inv_tx.type == "sell":
+        net_amount = inv_tx.amount - inv_tx.fee
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, INVESTMENT_INCOME_CATEGORY, "income")
+        tx_type = "income"
+        amount = net_amount
+        description = f"[投资卖出] {security.symbol} {security.name} - {inv_tx.quantity}股 × {inv_tx.price}"
+        if inv_tx.fee > 0:
+            description += f" (扣除手续费{inv_tx.fee})"
+        if inv_tx.realized_gain != 0:
+            gain_str = f"+{inv_tx.realized_gain:.2f}" if inv_tx.realized_gain > 0 else f"{inv_tx.realized_gain:.2f}"
+            description += f" [已实现收益{gain_str}]"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    elif inv_tx.type == "dividend":
+        if inv_tx.dividend_after_tax is not None:
+            amount = inv_tx.dividend_after_tax
+        else:
+            amount = inv_tx.dividend_amount or 0.0
+        cat = _get_or_create_investment_category(db, inv_tx.ledger_id, DIVIDEND_INCOME_CATEGORY, "income")
+        tx_type = "income"
+        description = f"[股息分红] {security.symbol} {security.name} - 税前{inv_tx.dividend_amount or 0:.2f}"
+        if inv_tx.dividend_tax > 0:
+            description += f"，扣税{inv_tx.dividend_tax:.2f}，税后{amount:.2f}"
+        if inv_tx.reinvest:
+            description += " (分红再投资)"
+        if inv_tx.description:
+            description += f" - {inv_tx.description}"
+    else:
+        return None
+
+    if security.currency != ledger.base_currency:
+        try:
+            converted_amount, rate, rate_date, source = convert_amount(
+                db, amount, security.currency, ledger.base_currency, inv_tx.date
+            )
+            tx_amount = converted_amount
+            description += f" [{security.currency} {amount:.2f} × 汇率{rate:.4f} = {ledger.base_currency} {converted_amount:.2f}]"
+        except ValueError:
+            tx_amount = amount
+            description += f" [币种{security.currency}，汇率获取失败，按原金额记录]"
+    else:
+        tx_amount = amount
+
+    regular_tx.amount = _round2(tx_amount)
+    regular_tx.type = tx_type
+    regular_tx.description = description
+    regular_tx.category_id = cat.id
+    regular_tx.account_id = inv_tx.account_id
+    regular_tx.date = inv_tx.date
+
+    db.flush()
+
+    return regular_tx
+
+
+def _delete_linked_regular_transaction(db: Session, inv_tx: InvestmentTransaction) -> None:
+    if not inv_tx.linked_regular_transaction_id:
+        return
+
+    regular_tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == inv_tx.linked_regular_transaction_id)
+        .first()
+    )
+    if regular_tx:
+        db.delete(regular_tx)
+        inv_tx.linked_regular_transaction_id = None
+        db.flush()
+
+
+def _delete_investment_transaction_complete(db: Session, inv_tx: InvestmentTransaction) -> None:
+    if inv_tx.type == "buy":
+        lot = (
+            db.query(InvestmentLot)
+            .filter(InvestmentLot.buy_transaction_id == inv_tx.id)
+            .first()
+        )
+        if lot:
+            if not lot.is_closed and abs(lot.quantity_remaining - lot.original_quantity) > 1e-9:
+                raise HTTPException(
+                    status_code=400,
+                    detail="该买入交易对应持仓已部分卖出，无法删除。请先删除相关的卖出交易。",
+                )
+            db.query(TaxLotSale).filter(TaxLotSale.lot_id == lot.id).delete()
+            db.delete(lot)
+
+    elif inv_tx.type == "sell":
+        db.query(TaxLotSale).filter(TaxLotSale.sell_transaction_id == inv_tx.id).delete()
+
+        sell_lots = (
+            db.query(InvestmentLot)
+            .join(TaxLotSale, TaxLotSale.lot_id == InvestmentLot.id)
+            .filter(TaxLotSale.sell_transaction_id == inv_tx.id)
+            .all()
+        )
+        for lot in sell_lots:
+            tls = (
+                db.query(TaxLotSale)
+                .filter(
+                    TaxLotSale.sell_transaction_id == inv_tx.id,
+                    TaxLotSale.lot_id == lot.id,
+                )
+                .first()
+            )
+            if tls:
+                lot.quantity_remaining += tls.quantity_sold
+                if lot.quantity_remaining > 1e-9:
+                    lot.is_closed = False
+                db.flush()
+
+    elif inv_tx.type == "dividend" and inv_tx.reinvest:
+        reinvest_tx = (
+            db.query(InvestmentTransaction)
+            .filter(InvestmentTransaction.linked_transaction_id == inv_tx.id)
+            .first()
+        )
+        if reinvest_tx:
+            _delete_investment_transaction_complete(db, reinvest_tx)
+
+    elif inv_tx.type == "split":
+        pass
+
+    _delete_linked_regular_transaction(db, inv_tx)
+    db.delete(inv_tx)
+    db.flush()
 
 
 def _validate_ledger(db: Session, ledger_id: int) -> Ledger:
@@ -311,7 +582,7 @@ def _apply_split(db: Session, tx: InvestmentTransaction, security_id: int, ledge
     db.flush()
 
 
-def _process_dividend(db: Session, tx: InvestmentTransaction, security_id: int, ledger_id: int):
+def _process_dividend(db: Session, tx: InvestmentTransaction, security_id: int, ledger_id: int, security: InvestmentSecurity = None, ledger: Ledger = None):
     if tx.dividend_amount is None:
         raise HTTPException(status_code=400, detail="分红金额不能为空")
     if tx.dividend_amount <= 0:
@@ -345,6 +616,9 @@ def _process_dividend(db: Session, tx: InvestmentTransaction, security_id: int, 
         db.add(reinvest_tx)
         db.flush()
         _create_buy_lot(db, reinvest_tx, security_id, ledger_id)
+
+        if security and ledger:
+            _sync_investment_to_regular_transaction(db, reinvest_tx, security, ledger)
 
     db.flush()
 
@@ -438,7 +712,7 @@ def list_transactions(
 def create_transaction(data: InvestmentTransactionCreate, db: Session = Depends(get_db)):
     ledger = _validate_ledger(db, data.ledger_id)
     _validate_account(db, data.account_id, data.ledger_id)
-    _validate_security(db, data.security_id, data.ledger_id)
+    security = _validate_security(db, data.security_id, data.ledger_id)
 
     if data.type not in VALID_TX_TYPES:
         raise HTTPException(status_code=400, detail=f"交易类型必须是 {VALID_TX_TYPES}")
@@ -477,7 +751,103 @@ def create_transaction(data: InvestmentTransactionCreate, db: Session = Depends(
     elif data.type == "split":
         _apply_split(db, tx, data.security_id, data.ledger_id)
     elif data.type == "dividend":
-        _process_dividend(db, tx, data.security_id, data.ledger_id)
+        _process_dividend(db, tx, data.security_id, data.ledger_id, security, ledger)
+
+    _sync_investment_to_regular_transaction(db, tx, security, ledger)
+
+    db.commit()
+    db.refresh(tx)
+    return tx
+
+
+@router.get("/transactions/{transaction_id}", response_model=InvestmentTransactionOut)
+def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    tx = (
+        db.query(InvestmentTransaction)
+        .filter(InvestmentTransaction.id == transaction_id)
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="交易不存在")
+    return tx
+
+
+@router.put("/transactions/{transaction_id}", response_model=InvestmentTransactionOut)
+def update_transaction(
+    transaction_id: int, data: InvestmentTransactionUpdate, db: Session = Depends(get_db)
+):
+    tx = (
+        db.query(InvestmentTransaction)
+        .filter(InvestmentTransaction.id == transaction_id)
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="交易不存在")
+
+    if tx.type == "split":
+        raise HTTPException(
+            status_code=400,
+            detail="拆股交易不支持修改，请删除后重新录入。",
+        )
+
+    ledger = _validate_ledger(db, tx.ledger_id)
+    security = _validate_security(db, tx.security_id, tx.ledger_id)
+
+    if data.account_id is not None:
+        _validate_account(db, data.account_id, tx.ledger_id)
+
+    if tx.type in {"buy", "sell"}:
+        existing_sells = (
+            db.query(TaxLotSale)
+            .join(InvestmentLot, TaxLotSale.lot_id == InvestmentLot.id)
+            .filter(InvestmentLot.buy_transaction_id == tx.id)
+            .count()
+        )
+        if existing_sells > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="该交易涉及的持仓已产生卖出记录，无法修改。请先删除相关的卖出交易。",
+            )
+
+    update_dict = data.model_dump(exclude_unset=True)
+
+    if "quantity" in update_dict or "price" in update_dict:
+        new_qty = update_dict.get("quantity", tx.quantity)
+        new_price = update_dict.get("price", tx.price)
+        if tx.type in {"buy", "sell"}:
+            update_dict["amount"] = _round2(new_qty * new_price)
+
+    for key, value in update_dict.items():
+        setattr(tx, key, value)
+
+    db.flush()
+
+    if tx.type == "buy":
+        lot = (
+            db.query(InvestmentLot)
+            .filter(InvestmentLot.buy_transaction_id == tx.id)
+            .first()
+        )
+        if lot:
+            total_cost = tx.amount + tx.fee
+            qty = tx.quantity
+            if qty <= 0:
+                raise HTTPException(status_code=400, detail="买入数量必须大于0")
+            cost_per_share = total_cost / qty
+            lot.quantity_remaining = qty
+            lot.cost_basis_per_share = cost_per_share
+            lot.original_quantity = qty
+            db.flush()
+
+    elif tx.type == "dividend":
+        div_tax = _round2(tx.dividend_amount * DIVIDEND_TAX_RATE)
+        div_after_tax = _round2(tx.dividend_amount - div_tax)
+        tx.dividend_tax = div_tax
+        tx.dividend_after_tax = div_after_tax
+        tx.amount = _round2(tx.dividend_amount)
+        db.flush()
+
+    _update_regular_transaction_from_investment(db, tx, security, ledger)
 
     db.commit()
     db.refresh(tx)
@@ -493,10 +863,19 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     )
     if not tx:
         raise HTTPException(status_code=404, detail="交易不存在")
-    raise HTTPException(
-        status_code=400,
-        detail="为保证成本计算的准确性，投资交易暂不支持删除。建议通过反向交易冲销。",
+
+    linked_txs = (
+        db.query(InvestmentTransaction)
+        .filter(InvestmentTransaction.linked_transaction_id == tx.id)
+        .all()
     )
+    for linked_tx in linked_txs:
+        _delete_investment_transaction_complete(db, linked_tx)
+
+    _delete_investment_transaction_complete(db, tx)
+
+    db.commit()
+    return {"message": "删除成功"}
 
 
 @router.get("/summary", response_model=PortfolioSummary)

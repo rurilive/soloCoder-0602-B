@@ -12,6 +12,9 @@ from typing import Optional, List
 from app.database import engine, SessionLocal, Base, get_db
 from app.models import Ledger, Category, Transaction, Budget, Account, Transfer, RecurringRule, ExchangeRate, Loan, LoanRepaymentSchedule, InvestmentSecurity, InvestmentTransaction, InvestmentLot, TaxLotSale, Tag
 from app.routers import ledgers, categories, transactions, statistics, recurring, budgets, accounts, transfers, exchange_rates, reconciliation, loans, prediction, anomaly, portfolio, tags
+from app.routers.portfolio import (
+    _sync_investment_to_regular_transaction,
+)
 from app.schemas import FinancialHealthScore, HealthScoreDimension
 from app.exchange_rate import convert_amount
 
@@ -43,19 +46,25 @@ def seed_db():
         Category(name="工资", type="income", icon="money-collect", ledger_id=personal.id),
         Category(name="兼职", type="income", icon="laptop", ledger_id=personal.id),
         Category(name="奖金", type="income", icon="gift", ledger_id=personal.id),
+        Category(name="投资收入", type="income", icon="rise", ledger_id=personal.id),
+        Category(name="股息分红", type="income", icon="gift", ledger_id=personal.id),
         Category(name="餐饮", type="expense", icon="coffee", ledger_id=personal.id),
         Category(name="交通", type="expense", icon="car", ledger_id=personal.id),
         Category(name="购物", type="expense", icon="shopping", ledger_id=personal.id),
         Category(name="娱乐", type="expense", icon="smile", ledger_id=personal.id),
         Category(name="居住", type="expense", icon="home", ledger_id=personal.id),
+        Category(name="投资支出", type="expense", icon="fund", ledger_id=personal.id),
     ]
     cats_family = [
         Category(name="工资", type="income", icon="money-collect", ledger_id=family.id),
         Category(name="投资", type="income", icon="fund", ledger_id=family.id),
+        Category(name="投资收入", type="income", icon="rise", ledger_id=family.id),
+        Category(name="股息分红", type="income", icon="gift", ledger_id=family.id),
         Category(name="餐饮", type="expense", icon="coffee", ledger_id=family.id),
         Category(name="教育", type="expense", icon="read", ledger_id=family.id),
         Category(name="医疗", type="expense", icon="medicine-box", ledger_id=family.id),
         Category(name="居住", type="expense", icon="home", ledger_id=family.id),
+        Category(name="投资支出", type="expense", icon="fund", ledger_id=family.id),
     ]
     db.add_all(cats_personal + cats_family)
     db.commit()
@@ -374,7 +383,7 @@ def seed_db():
         tx.tax_amount_capital = 0.0
         db.flush()
 
-    def process_dividend(tx, sec_id, ledger_id):
+    def process_dividend(tx, sec_id, ledger_id, security=None, ledger_obj=None):
         db.add(tx)
         db.flush()
         div_tax = round((tx.dividend_amount or 0.0) * DIVIDEND_TAX_RATE_SEED, 2)
@@ -408,16 +417,22 @@ def seed_db():
                 is_closed=False, ledger_id=ledger_id,
             )
             db.add(r_lot)
+            if security and ledger_obj:
+                _sync_investment_to_regular_transaction(db, reinvest_tx, security, ledger_obj)
         db.flush()
 
     buy1 = create_inv_tx(sh600519.id, "buy", 100, 1500.00, 5.00, "2025-12-01", personal.id, inv_account.id, description="首次建仓茅台")
     process_buy(buy1, sh600519.id, personal.id)
+    _sync_investment_to_regular_transaction(db, buy1, sh600519, personal)
     buy2 = create_inv_tx(sh600519.id, "buy", 50, 1600.00, 3.00, "2026-01-15", personal.id, inv_account.id, description="加仓茅台")
     process_buy(buy2, sh600519.id, personal.id)
+    _sync_investment_to_regular_transaction(db, buy2, sh600519, personal)
     sell1 = create_inv_tx(sh600519.id, "sell", 30, 1650.00, 2.00, "2026-02-20", personal.id, inv_account.id, description="部分卖出验证FIFO")
     process_sell_fifo(sell1, sh600519.id, personal.id)
+    _sync_investment_to_regular_transaction(db, sell1, sh600519, personal)
     buy3 = create_inv_tx(sh600519.id, "buy", 80, 1550.00, 4.00, "2026-03-10", personal.id, inv_account.id, description="回调加仓")
     process_buy(buy3, sh600519.id, personal.id)
+    _sync_investment_to_regular_transaction(db, buy3, sh600519, personal)
     split1 = create_inv_tx(sh600519.id, "split", 0, 0, 0, "2026-04-01", personal.id, inv_account.id, split_ratio=2.0, description="10送10拆股验证")
     db.add(split1)
     db.flush()
@@ -433,38 +448,51 @@ def seed_db():
         lot.cost_basis_per_share = total_cost / lot.quantity_remaining
     db.flush()
     div1 = create_inv_tx(sh600519.id, "dividend", 0, 0, 0, "2026-05-15", personal.id, inv_account.id, dividend_amount=2580.00, description="现金分红")
-    process_dividend(div1, sh600519.id, personal.id)
+    process_dividend(div1, sh600519.id, personal.id, sh600519, personal)
+    _sync_investment_to_regular_transaction(db, div1, sh600519, personal)
 
     etf_buy1 = create_inv_tx(sh510300.id, "buy", 10000, 3.80, 5.00, "2025-11-01", personal.id, inv_account.id, description="定投沪深300")
     process_buy(etf_buy1, sh510300.id, personal.id)
+    _sync_investment_to_regular_transaction(db, etf_buy1, sh510300, personal)
     etf_buy2 = create_inv_tx(sh510300.id, "buy", 5000, 4.00, 3.00, "2026-01-01", personal.id, inv_account.id, description="定投加仓")
     process_buy(etf_buy2, sh510300.id, personal.id)
+    _sync_investment_to_regular_transaction(db, etf_buy2, sh510300, personal)
     etf_buy3 = create_inv_tx(sh510300.id, "buy", 8000, 4.10, 4.00, "2026-03-01", personal.id, inv_account.id, description="定投")
     process_buy(etf_buy3, sh510300.id, personal.id)
+    _sync_investment_to_regular_transaction(db, etf_buy3, sh510300, personal)
     etf_sell = create_inv_tx(sh510300.id, "sell", 3000, 4.20, 1.50, "2026-05-01", personal.id, inv_account.id, description="止盈部分仓位")
     process_sell_fifo(etf_sell, sh510300.id, personal.id)
+    _sync_investment_to_regular_transaction(db, etf_sell, sh510300, personal)
 
     aapl_buy1 = create_inv_tx(aapl.id, "buy", 50, 180.00, 1.00, "2025-12-15", personal.id, usd_inv.id, description="买入苹果")
     process_buy(aapl_buy1, aapl.id, personal.id)
+    _sync_investment_to_regular_transaction(db, aapl_buy1, aapl, personal)
     aapl_buy2 = create_inv_tx(aapl.id, "buy", 30, 195.00, 0.80, "2026-02-10", personal.id, usd_inv.id, description="加仓苹果")
     process_buy(aapl_buy2, aapl.id, personal.id)
+    _sync_investment_to_regular_transaction(db, aapl_buy2, aapl, personal)
     aapl_div = create_inv_tx(aapl.id, "dividend", 0, 0, 0, "2026-03-15", personal.id, usd_inv.id, dividend_amount=48.00, description="苹果季度分红")
-    process_dividend(aapl_div, aapl.id, personal.id)
+    process_dividend(aapl_div, aapl.id, personal.id, aapl, personal)
+    _sync_investment_to_regular_transaction(db, aapl_div, aapl, personal)
 
     tsla_buy1 = create_inv_tx(tsla.id, "buy", 40, 240.00, 1.20, "2026-01-05", personal.id, usd_inv.id, description="买入特斯拉")
     process_buy(tsla_buy1, tsla.id, personal.id)
+    _sync_investment_to_regular_transaction(db, tsla_buy1, tsla, personal)
     tsla_sell = create_inv_tx(tsla.id, "sell", 10, 190.00, 0.60, "2026-04-20", personal.id, usd_inv.id, description="止损部分仓位")
     process_sell_fifo(tsla_sell, tsla.id, personal.id)
+    _sync_investment_to_regular_transaction(db, tsla_sell, tsla, personal)
 
     fam_etf1 = create_inv_tx(family_510300.id, "buy", 20000, 3.90, 8.00, "2025-12-01", family.id, family_inv.id, description="家庭配置沪深300")
     process_buy(fam_etf1, family_510300.id, family.id)
+    _sync_investment_to_regular_transaction(db, fam_etf1, family_510300, family)
     fam_etf2 = create_inv_tx(family_510300.id, "buy", 10000, 4.05, 4.00, "2026-02-01", family.id, family_inv.id, description="追加配置")
     process_buy(fam_etf2, family_510300.id, family.id)
+    _sync_investment_to_regular_transaction(db, fam_etf2, family_510300, family)
     fam_div_reinvest = create_inv_tx(
         family_510300.id, "dividend", 0, 4.00, 0, "2026-04-15", family.id, family_inv.id,
         dividend_amount=4800.00, reinvest=True, description="分红再投资验证"
     )
-    process_dividend(fam_div_reinvest, family_510300.id, family.id)
+    process_dividend(fam_div_reinvest, family_510300.id, family.id, family_510300, family)
+    _sync_investment_to_regular_transaction(db, fam_div_reinvest, family_510300, family)
 
     db.commit()
     db.close()
