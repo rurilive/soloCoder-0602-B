@@ -909,7 +909,14 @@ def annual_report(
                 level_color="#bfbfbf",
             ))
 
-    latest_health_score = _build_full_health_score(db, ledger_id, year, 12, ledger)
+    latest_health_score = None
+    for m in range(12, 0, -1):
+        hs = _build_full_health_score(db, ledger_id, year, m, ledger)
+        if hs and hs.months_analyzed > 0:
+            latest_health_score = hs
+            break
+    if latest_health_score is None:
+        latest_health_score = _build_full_health_score(db, ledger_id, year, 12, ledger)
 
     return AnnualReportResponse(
         ledger_id=ledger_id,

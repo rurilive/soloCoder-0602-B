@@ -128,7 +128,6 @@ export default function AnnualReport({ currentLedger }) {
     yField: 'value',
     seriesField: 'type',
     smooth: true,
-    isGroup: true,
     color: ['#52c41a', '#f5222d', '#1890ff'],
     legend: { position: 'top' },
     point: { size: 4, shape: 'circle' },
