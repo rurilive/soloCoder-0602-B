@@ -302,6 +302,213 @@ def _compute_month_health_score(db: Session, ledger_id: int, year: int, month: i
     }
 
 
+def _build_full_health_score(db: Session, ledger_id: int, year: int, month: int, ledger: Ledger) -> Optional[FinancialHealthScore]:
+    start, end = _month_range(year, month)
+    tx_rows = (
+        db.query(Transaction.type, Transaction.amount, Transaction.date, Transaction.account_id)
+        .filter(Transaction.ledger_id == ledger_id, Transaction.date >= start, Transaction.date < end)
+        .all()
+    )
+    if not tx_rows:
+        return FinancialHealthScore(
+            ledger_id=ledger_id,
+            total_score=0,
+            level="很差",
+            level_description="当月暂无数据，无法评估财务健康状况",
+            level_color="#f5222d",
+            dimensions=[],
+            overall_suggestions=["建议先记录至少一个月的收支数据，以便进行财务健康评估。"],
+            months_analyzed=0,
+        )
+
+    base_currency = ledger.base_currency
+    account_ids = list(set(r.account_id for r in tx_rows))
+    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+    account_currency_map = {a.id: a.currency for a in accounts}
+
+    income = 0.0
+    expense = 0.0
+    for r in tx_rows:
+        src_cur = account_currency_map.get(r.account_id, base_currency)
+        amount = float(r.amount or 0)
+        if src_cur != base_currency:
+            try:
+                converted, _, _, _ = convert_amount(db, amount, src_cur, base_currency, r.date)
+                amount = converted
+            except ValueError:
+                pass
+        if r.type == "income":
+            income += amount
+        else:
+            expense += amount
+
+    net = income - expense
+    savings_rate = net / income if income > 0 else 0.0
+    tx_count = len(tx_rows)
+
+    dimensions = []
+
+    savings_score = 0.0
+    savings_suggestions = []
+    if income > 0:
+        if savings_rate >= 0.3:
+            savings_score = 100
+            savings_suggestions.append("储蓄率优秀，继续保持！")
+        elif savings_rate >= 0.2:
+            savings_score = 80
+            savings_suggestions.append("储蓄率良好，可考虑适当提升投资比例。")
+        elif savings_rate >= 0.1:
+            savings_score = 60
+            savings_suggestions.append("储蓄率一般，建议控制非必要支出。")
+        elif savings_rate >= 0:
+            savings_score = 40
+            savings_suggestions.append("储蓄率偏低，需要认真审视消费习惯。")
+        else:
+            savings_score = 10
+            savings_suggestions.append("入不敷出！请立即削减支出或增加收入来源。")
+    else:
+        savings_suggestions.append("暂无收入数据，建议记录收入来源。")
+
+    dimensions.append(HealthScoreDimension(
+        key="savings",
+        name="储蓄能力",
+        score=round(savings_score, 1),
+        weight=0.30,
+        max_score=100,
+        description=f"当月储蓄率：{savings_rate * 100:.1f}%",
+        suggestions=savings_suggestions,
+    ))
+
+    balance_score = 100.0 if net >= 0 else 0.0
+    balance_suggestions = []
+    if net >= 0:
+        balance_suggestions.append("当月实现收支平衡，保持良好习惯！")
+    else:
+        balance_suggestions.append("当月出现超支，需要关注支出情况。")
+
+    dimensions.append(HealthScoreDimension(
+        key="balance",
+        name="收支平衡",
+        score=round(balance_score, 1),
+        weight=0.25,
+        max_score=100,
+        description="当月收支是否平衡",
+        suggestions=balance_suggestions,
+    ))
+
+    expense_score = 60.0
+    expense_suggestions = ["单月数据无法评估支出稳定性，建议持续记录。"]
+    dimensions.append(HealthScoreDimension(
+        key="expense_stability",
+        name="支出稳定性",
+        score=round(expense_score, 1),
+        weight=0.20,
+        max_score=100,
+        description="需连续多月数据评估支出波动",
+        suggestions=expense_suggestions,
+    ))
+
+    debt_score = 100.0
+    debt_suggestions = []
+    loans = db.query(Loan).filter(Loan.ledger_id == ledger_id, Loan.status == "active").all()
+    total_loan_payment = 0.0
+    if loans:
+        for loan in loans:
+            schedules = (
+                db.query(LoanRepaymentSchedule)
+                .filter(
+                    LoanRepaymentSchedule.loan_id == loan.id,
+                    LoanRepaymentSchedule.due_date >= start,
+                    LoanRepaymentSchedule.due_date < end,
+                )
+                .all()
+            )
+            for s in schedules:
+                total_loan_payment += s.payment_amount
+
+    debt_to_income = 0.0
+    if income > 0:
+        debt_to_income = total_loan_payment / income
+        if debt_to_income <= 0.1:
+            debt_score = 100
+            debt_suggestions.append("债务负担极轻，财务自由度高！")
+        elif debt_to_income <= 0.3:
+            debt_score = 80
+            debt_suggestions.append("债务负担合理，可适度还款加快清债。")
+        elif debt_to_income <= 0.5:
+            debt_score = 60
+            debt_suggestions.append("债务负担较重，建议优先偿还高息贷款。")
+        elif debt_to_income <= 0.7:
+            debt_score = 40
+            debt_suggestions.append("债务压力大，需要制定加速还款计划。")
+        else:
+            debt_score = 10
+            debt_suggestions.append("债务极其危险！请立即寻求专业财务建议。")
+    else:
+        if not loans:
+            debt_suggestions.append("目前没有负债，财务状况良好。")
+        else:
+            debt_suggestions.append("暂无收入数据，无法评估债务压力。")
+
+    dimensions.append(HealthScoreDimension(
+        key="debt",
+        name="债务压力",
+        score=round(debt_score, 1),
+        weight=0.15,
+        max_score=100,
+        description=f"债务收入比：{debt_to_income * 100:.1f}%" if income > 0 else "数据不足",
+        suggestions=debt_suggestions,
+    ))
+
+    activity_score = 0.0
+    activity_suggestions = []
+    if tx_count >= 40:
+        activity_score = 100
+        activity_suggestions.append("记账非常积极，数据详尽可靠！")
+    elif tx_count >= 20:
+        activity_score = 80
+        activity_suggestions.append("记账习惯良好，建议保持。")
+    elif tx_count >= 10:
+        activity_score = 60
+        activity_suggestions.append("记账频率一般，小额支出也请记录。")
+    else:
+        activity_score = 40
+        activity_suggestions.append("记账偏少，建议养成每日记账习惯。")
+
+    dimensions.append(HealthScoreDimension(
+        key="activity",
+        name="记账活跃度",
+        score=round(activity_score, 1),
+        weight=0.10,
+        max_score=100,
+        description=f"当月共{tx_count}笔记录",
+        suggestions=activity_suggestions,
+    ))
+
+    total_score = sum(d.score * d.weight for d in dimensions)
+    total_score = round(max(0.0, min(100.0, total_score)), 1)
+    level_info = _get_level_info(total_score)
+
+    overall_suggestions = []
+    for d in dimensions:
+        if d.score < 60:
+            overall_suggestions.extend(d.suggestions)
+    if not overall_suggestions:
+        overall_suggestions.append("财务状况整体良好，继续保持当前的理财习惯！")
+        overall_suggestions.append("建议定期查看财务报告，及时调整财务策略。")
+
+    return FinancialHealthScore(
+        ledger_id=ledger_id,
+        total_score=total_score,
+        level=level_info["level"],
+        level_description=level_info["description"],
+        level_color=level_info["color"],
+        dimensions=dimensions,
+        overall_suggestions=overall_suggestions,
+        months_analyzed=1,
+    )
+
+
 @router.get("/annual", response_model=AnnualReportResponse)
 def annual_report(
     ledger_id: int = Query(...),
@@ -702,6 +909,8 @@ def annual_report(
                 level_color="#bfbfbf",
             ))
 
+    latest_health_score = _build_full_health_score(db, ledger_id, year, 12, ledger)
+
     return AnnualReportResponse(
         ledger_id=ledger_id,
         year=year,
@@ -718,4 +927,5 @@ def annual_report(
         tax_summary=tax_summary,
         budget_summary=budget_summary,
         health_score_history=health_score_history,
+        latest_health_score=latest_health_score,
     )

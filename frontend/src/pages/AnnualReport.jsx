@@ -115,20 +115,45 @@ export default function AnnualReport({ currentLedger }) {
     },
   };
 
-  const cashFlowData = data.monthly_cash_flow.map((m) => ({
-    month: m.label,
-    收入: m.income,
-    支出: m.expense,
-    净现金流: m.net_cash_flow,
-  }));
+  const cashFlowData = [];
+  data.monthly_cash_flow.forEach((m) => {
+    cashFlowData.push({ month: m.label, type: '收入', value: m.income });
+    cashFlowData.push({ month: m.label, type: '支出', value: m.expense });
+    cashFlowData.push({ month: m.label, type: '净现金流', value: m.net_cash_flow });
+  });
 
   const lineConfig = {
     data: cashFlowData,
     xField: 'month',
-    yField: ['收入', '支出', '净现金流'],
+    yField: 'value',
+    seriesField: 'type',
     smooth: true,
+    isGroup: true,
+    color: ['#52c41a', '#f5222d', '#1890ff'],
     legend: { position: 'top' },
     point: { size: 4, shape: 'circle' },
+    tooltip: {
+      shared: true,
+      customContent: (title, items) => {
+        if (!items || items.length === 0) return '';
+        let content = `<div style="padding: 8px 12px;"><div style="font-weight: 600; margin-bottom: 8px;">${title}</div>`;
+        items.forEach(item => {
+          const color = item.color;
+          const value = Number(item.value);
+          const displayValue = formatCurrency(Math.abs(value), data.base_currency);
+          const sign = value >= 0 ? '+' : '-';
+          content += `<div style="display: flex; justify-content: space-between; gap: 24px; margin: 4px 0;">`;
+          content += `<span style="display: flex; align-items: center; gap: 6px;">`;
+          content += `<span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 50%;"></span>`;
+          content += `${item.name}`;
+          content += `</span>`;
+          content += `<span style="font-weight: 500;">${item.name === '支出' ? '-' : sign}${displayValue}</span>`;
+          content += `</div>`;
+        });
+        content += `</div>`;
+        return content;
+      },
+    },
   };
 
   const healthScoreData = data.health_score_history.map((h) => ({
